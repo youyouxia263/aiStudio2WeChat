@@ -192,17 +192,10 @@ const App = () => {
     // Configure Marked Renderer for Custom Media (Videos/YouTube)
     marked.use({
       renderer: {
-        image(href: any, title: any, text: any) {
-          let cleanHref = href;
-          let cleanTitle = title;
-          let cleanText = text;
-
-          // Handle possible token object from newer marked versions
-          if (typeof href === 'object' && href !== null) {
-            cleanHref = href.href || '';
-            cleanTitle = href.title || '';
-            cleanText = href.text || '';
-          }
+        image(token: any) {
+          const cleanHref = token.href || '';
+          const cleanTitle = token.title || '';
+          const cleanText = token.text || '';
 
           // Defensive check: ensure href is a string
           if (typeof cleanHref !== 'string') {
@@ -262,8 +255,11 @@ const App = () => {
 
   // --- Generation Logic ---
 
-  const generateArticle = async () => {
-    if (!url.trim()) {
+  const generateArticle = async (overrideUrl?: string | unknown) => {
+    // Determine the URL to use: either the override string or the current state
+    const targetUrl = typeof overrideUrl === 'string' ? overrideUrl : url;
+
+    if (!targetUrl.trim()) {
       setError("Please enter a valid GitHub URL");
       return;
     }
@@ -278,7 +274,7 @@ const App = () => {
     try {
       const prompt = `
         You are an expert tech blogger for a popular WeChat Official Account (公众号). 
-        Your task is to write a "cool", engaging, and structured article introducing the following GitHub repository: ${url}.
+        Your task is to write a "cool", engaging, and structured article introducing the following GitHub repository: ${targetUrl}.
 
         The article must follow this structure (output in Markdown):
         
@@ -391,6 +387,39 @@ const App = () => {
       setError(err.message || "Failed to generate article. Please check your network or model settings.");
       setImageLoading(false);
     } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleTrending = async () => {
+    if (loading) return;
+    setLoading(true);
+    setError("");
+    setArticle("");
+    setHeaderImage(null);
+    
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: "Find the URL of the #1 top trending GitHub repository for today. Return ONLY the full URL starting with https://github.com/. Do not write any other text.",
+        config: { tools: [{ googleSearch: {} }] }
+      });
+      
+      const text = response.text || "";
+      const match = text.match(/https:\/\/github\.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+/);
+      
+      if (match) {
+        const foundUrl = match[0];
+        setUrl(foundUrl);
+        // Directly call generateArticle with the found URL
+        await generateArticle(foundUrl); 
+      } else {
+        throw new Error("Could not find a valid GitHub URL for today's trending repo.");
+      }
+    } catch (e: any) {
+      console.error(e);
+      setError("Failed to fetch trending repo: " + e.message);
       setLoading(false);
     }
   };
@@ -637,16 +666,24 @@ const App = () => {
 
         {/* Input Section */}
         <div className="glass-panel p-2 rounded-2xl shadow-2xl shadow-indigo-500/10 mb-8 flex flex-col md:flex-row gap-2 transition-all hover:shadow-indigo-500/20">
+          <button
+             onClick={handleTrending}
+             disabled={loading}
+             className="px-4 py-2 rounded-xl font-bold text-white transition-all duration-300 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-400 hover:to-red-400 whitespace-nowrap flex items-center gap-2"
+             title="Fetch current #1 trending repo and generate article"
+          >
+             <span>🔥 Trending</span>
+          </button>
           <input
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://github.com/username/repository"
-            className="flex-1 bg-transparent border-none outline-none text-white px-6 py-4 placeholder-slate-500 text-lg w-full"
+            className="flex-1 bg-transparent border-none outline-none text-white px-4 py-4 placeholder-slate-500 text-lg w-full"
             onKeyDown={(e) => e.key === 'Enter' && generateArticle()}
           />
           <button
-            onClick={generateArticle}
+            onClick={() => generateArticle()}
             disabled={loading}
             className={`
               px-8 py-4 rounded-xl font-bold text-white transition-all duration-300
