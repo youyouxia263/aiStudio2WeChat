@@ -94,21 +94,42 @@ const PROXIES = [
   "https://api.codetabs.com/v1/proxy?quest="
 ];
 
+// Helper to check if a URL is likely to require a proxy (basic heuristic)
+const needsProxy = (url: string) => {
+  if (url.includes('api.weixin.qq.com')) return true; // WeChat definitely needs proxy
+  return false; // Default to trying direct first
+};
+
 async function fetchWithProxy(targetUrl: string, options?: RequestInit) {
   let lastError: any;
+  const isWeChat = targetUrl.includes('api.weixin.qq.com');
+
+  // 1. Try Direct Fetch first (Skip if known to need proxy)
+  if (!isWeChat) {
+    try {
+      const response = await fetch(targetUrl, options);
+      // If we get a response (even 4xx/5xx), the network path works.
+      // CORS failures typically throw an exception in fetch.
+      return response;
+    } catch (e) {
+      console.warn(`Direct fetch failed for ${targetUrl}, attempting proxies...`, e);
+      lastError = e;
+    }
+  }
   
+  // 2. Fallback to Proxies
   for (const proxyBase of PROXIES) {
     try {
       // Encode URL for the proxy
       const proxyUrl = `${proxyBase}${encodeURIComponent(targetUrl)}`;
       const response = await fetch(proxyUrl, options);
       
-      if (response.ok) {
+      // If proxy returns successful status or at least a valid server response
+      if (response.ok || response.status < 500) {
         return response;
       }
       
-      // If the proxy returns an error status (e.g., 403, 500), try the next one
-      console.warn(`Proxy ${proxyBase} returned status ${response.status} for ${targetUrl}`);
+      console.warn(`Proxy ${proxyBase} returned status ${response.status}`);
       lastError = new Error(`Proxy ${proxyBase} returned ${response.status}`);
     } catch (err) {
       console.warn(`Proxy ${proxyBase} connection failed:`, err);
@@ -116,7 +137,7 @@ async function fetchWithProxy(targetUrl: string, options?: RequestInit) {
     }
   }
   
-  throw lastError || new Error("All proxy services failed to connect.");
+  throw lastError || new Error("Failed to fetch: Unable to connect via direct link or proxies.");
 }
 
 // --- LLM Types ---
@@ -402,20 +423,54 @@ const App = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: "Find the URL of the #1 top trending GitHub repository for today. Return ONLY the full URL starting with https://github.com/. Do not write any other text.",
+        contents: "Search for 'github trending repositories today' or 'top github projects this week'. Identify one specific, real project URL (not the trending page itself). Return ONLY the full URL (e.g. https://github.com/facebook/react).",
         config: { tools: [{ googleSearch: {} }] }
       });
       
       const text = response.text || "";
-      const match = text.match(/https:\/\/github\.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+/);
       
-      if (match) {
-        const foundUrl = match[0];
+      // 1. Regex Extraction: Capture https://github.com/owner/repo
+      // We look for patterns that don't end in common non-repo suffixes
+      const matches = text.match(/https:\/\/github\.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9_.-]+/g);
+      let foundUrl = "";
+
+      // Helper to validate repo URL (exclude generic pages)
+      const isValidRepo = (u: string) => {
+        const invalid = ['/trending', '/topics', '/search', '/login', '/join', '/features', '/pricing', '/about', '/explore'];
+        // Ensure it's not just "github.com" or "github.com/trending"
+        // A valid repo has at least 4 parts: https, "", github.com, owner, repo
+        const parts = u.split('/');
+        return parts.length >= 5 && !invalid.some(i => u.includes(i));
+      };
+
+      if (matches) {
+        // Find first valid one
+        foundUrl = matches.find(isValidRepo) || "";
+      }
+
+      // 2. Fallback: Check grounding chunks if regex failed
+      if (!foundUrl) {
+         const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+         if (chunks) {
+            for (const chunk of chunks) {
+               if (chunk.web?.uri) {
+                  const uri = chunk.web.uri;
+                  if (uri.includes('github.com') && isValidRepo(uri)) {
+                     foundUrl = uri;
+                     break;
+                  }
+               }
+            }
+         }
+      }
+
+      if (foundUrl) {
+        // Clean trailing punctuation if regex picked it up (e.g. "repo.")
+        foundUrl = foundUrl.replace(/[.,;)]$/, "");
         setUrl(foundUrl);
-        // Directly call generateArticle with the found URL
         await generateArticle(foundUrl); 
       } else {
-        throw new Error("Could not find a valid GitHub URL for today's trending repo.");
+        throw new Error("Could not automatically identify a specific trending repo URL. Please try again or paste a URL manually.");
       }
     } catch (e: any) {
       console.error(e);
