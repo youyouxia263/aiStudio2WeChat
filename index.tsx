@@ -100,7 +100,12 @@ const i18n = {
     gemini: "Google Gemini (默认)",
     alibaba: "阿里百炼 (DashScope)",
     volcengine: "火山引擎 (ByteDance Ark)",
-    custom: "自定义 (OpenAI 兼容)"
+    custom: "自定义 (OpenAI 兼容)",
+    clearAll: "清除全部历史",
+    storageFull: "存储空间不足，已自动清理旧记录图片。",
+    visualStyle: "视觉风格",
+    articleTheme: "文章主题",
+    articleFont: "文章字体"
   },
   en: {
     title: "Git2WeChat Pro",
@@ -148,7 +153,12 @@ const i18n = {
     gemini: "Google Gemini (Default)",
     alibaba: "Alibaba DashScope",
     volcengine: "Volcengine (ByteDance Ark)",
-    custom: "Custom (OpenAI Compatible)"
+    custom: "Custom (OpenAI Compatible)",
+    clearAll: "Clear All History",
+    storageFull: "Storage nearly full. Old entry images pruned.",
+    visualStyle: "Visual Style",
+    articleTheme: "Article Theme",
+    articleFont: "Article Font"
   }
 };
 
@@ -249,16 +259,38 @@ const App = () => {
   useEffect(() => {
     const savedLang = localStorage.getItem('git2wechat_lang');
     if (savedLang) setLang(savedLang as Language);
+
+    const savedThemeId = localStorage.getItem('git2wechat_theme');
+    if (savedThemeId) {
+      const theme = THEMES.find(th => th.id === savedThemeId);
+      if (theme) setCurrentTheme(theme);
+    }
+
+    const savedFontId = localStorage.getItem('git2wechat_font');
+    if (savedFontId) {
+      const font = FONTS.find(f => f.id === savedFontId);
+      if (font) setCurrentFont(font);
+    }
+
     const savedWechat = localStorage.getItem('wechatConfig');
     if (savedWechat) setWechatConfig(JSON.parse(savedWechat));
+
     const savedLlm = localStorage.getItem('llmConfig_v2');
     if (savedLlm) setLlmConfig(JSON.parse(savedLlm));
+
     const savedHistoryData = localStorage.getItem('git2wechat_history_multi');
-    if (savedHistoryData) setHistory(JSON.parse(savedHistoryData));
+    if (savedHistoryData) {
+        try {
+            setHistory(JSON.parse(savedHistoryData));
+        } catch(e) {
+            setHistory([]);
+        }
+    }
 
     marked.use({
       renderer: {
-        image(href: string, title: string | null, text: string) {
+        image(token: { href: string; title: string | null; text: string }) {
+          const { href, title, text } = token;
           return `<img src="${href}" alt="${text || ''}" title="${title || ''}" class="w-full rounded-xl my-6 shadow-xl ring-1 ring-white/10" style="max-width:100%;" onerror="this.style.display='none'">`;
         }
       }
@@ -267,7 +299,12 @@ const App = () => {
 
   useEffect(() => {
     setCustomPrimaryColor(currentTheme.headingDecoration);
+    localStorage.setItem('git2wechat_theme', currentTheme.id);
   }, [currentTheme.id]);
+
+  useEffect(() => {
+    localStorage.setItem('git2wechat_font', currentFont.id);
+  }, [currentFont.id]);
 
   useEffect(() => {
     if (!isEditing && article && contentRef.current) {
@@ -285,9 +322,38 @@ const App = () => {
   };
 
   const saveToHistory = (entry: HistoryEntry) => {
-    const updatedHistory = [entry, ...history.filter(h => h.urls.join(',') !== entry.urls.join(','))].slice(0, 50);
-    setHistory(updatedHistory);
-    localStorage.setItem('git2wechat_history_multi', JSON.stringify(updatedHistory));
+    let updatedHistory = [entry, ...history.filter(h => h.urls.join(',') !== entry.urls.join(','))].slice(0, 10);
+    
+    const trySaving = (data: HistoryEntry[]) => {
+      try {
+        localStorage.setItem('git2wechat_history_multi', JSON.stringify(data));
+        setHistory(data);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+
+    if (!trySaving(updatedHistory)) {
+      for (let i = updatedHistory.length - 1; i >= 0; i--) {
+        updatedHistory[i] = {
+          ...updatedHistory[i],
+          headerImage: null,
+          projectImages: []
+        };
+        if (trySaving(updatedHistory)) {
+          console.warn(t.storageFull);
+          break;
+        }
+      }
+    }
+  };
+
+  const clearAllHistory = () => {
+    if (window.confirm(lang === 'zh' ? '确定清除所有历史记录吗？' : 'Are you sure you want to clear all history?')) {
+      localStorage.removeItem('git2wechat_history_multi');
+      setHistory([]);
+    }
   };
 
   const loadFromHistory = (entry: HistoryEntry) => {
@@ -357,7 +423,7 @@ const App = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: llmConfig.imageModel || 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `${prompt}. Clean design, professional font, high resolution.` }] },
+        contents: { parts: [{ text: `${prompt}. High resolution, sleek design, professional illustration.` }] },
         config: { imageConfig: { aspectRatio: ratio } },
       });
       const data = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
@@ -381,14 +447,7 @@ const App = () => {
         const data = await response.json();
         return data.data[0]?.b64_json ? `data:image/png;base64,${data.data[0].b64_json}` : null;
       } catch (e) {
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: { parts: [{ text: `${prompt}. fallback generation.` }] },
-          config: { imageConfig: { aspectRatio: ratio } },
-        });
-        const data = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-        return data ? `data:image/png;base64,${data}` : null;
+        return null;
       }
     }
   };
@@ -397,8 +456,7 @@ const App = () => {
     try {
       const prompt = `Fetch actual statistics for this GitHub repository: ${url}. 
       Return as a JSON object with keys: repoPath (e.g., owner/repo), description (short 1-sentence), stars, forks, contributors, issues. 
-      Use ${lang === 'zh' ? 'Chinese' : 'English'} for the description.
-      Example: {"repoPath": "facebook/react", "description": "A JavaScript library for building user interfaces", "stars": "200k+", "forks": "40k", "contributors": "1500+", "issues": "800+"}.`;
+      Use ${lang === 'zh' ? 'Chinese' : 'English'} for the description.`;
       const result = await executeTextTask(prompt, true);
       return JSON.parse(result || '{}');
     } catch (e) {
@@ -438,41 +496,43 @@ const App = () => {
         allStats.push(stats);
       }
 
-      const isSingle = validUrls.length === 1;
-      const prompt = `You are an expert tech blogger. Write a ${isSingle ? 'comprehensive deep-dive' : `curated selection`} about these GitHub repositories:
+      const repoNamesStr = allStats.map(s => s.repoPath).join('、');
+      
+      const prompt = `You are an expert tech blogger and WeChat SEO specialist. Write a viral article for a WeChat Official Account.
+      Featured Repositories:
       ${allStats.map((s, i) => `${i+1}. ${s.repoPath}: ${s.description}`).join('\n')}
       
       Requirements:
       1. Use ${lang === 'zh' ? 'Simplified Chinese' : 'English'}.
-      2. CHAPTER STRUCTURE: 
-         - Use # for the main title.
-         - Use ## for each project entry.
-         - Use ### for sub-sections within a project.
-      3. For each project, start with ## 0[INDEX+1]. [REPO_PATH].
-      4. Immediately below each ## project heading, include the placeholder "[PROJECT_CARD_INDEX]".
-      5. Include catchy taglines, technical highlights, and repository links.
-      6. Use plenty of emojis.
-      7. Output in Markdown.`;
+      2. CHAPTER STRUCTURE & TITLING: 
+         - Use # for the main title. 
+         - The title MUST include the names of ALL featured repositories: ${repoNamesStr}.
+         - Use ## for each project entry (e.g., "## 01. [REPO_PATH]").
+         - Use ### for sub-sections.
+      3. **CRITICAL**: Immediately below EACH "##" project heading, you MUST insert a placeholder like "[PROJECT_CARD_0]", "[PROJECT_CARD_1]", etc., corresponding to the project's index in the list.
+         Example: 
+         ## 01. facebook/react
+         [PROJECT_CARD_0]
+         React is a library...
+      4. Output strictly in Markdown.`;
 
       const resultText = await executeTextTask(prompt);
       setArticle(resultText || "No content generated.");
       
       setImageLoading(true);
-      const title = (resultText.match(/^#\s+(.+)$/m)?.[1] || "Project Recommendation").trim();
+      const titleMatch = resultText.match(/^#\s+(.+)$/m);
+      const title = titleMatch ? titleMatch[1].trim() : (lang === 'zh' ? `精选开源项目: ${repoNamesStr}` : `Featured Projects: ${repoNamesStr}`);
+      
       setLoadingText(t.loadingDesigning);
-      const mainCover = await generateImage(`A professional blog cover illustration titled "${title}". Modern tech aesthetic, soft UI colors.`);
+      const mainCover = await generateImage(`A professional, high-impact WeChat blog cover illustration for a post titled "${title}". Cyberpunk tech aesthetic.`);
       setHeaderImage(mainCover);
 
       const cards: string[] = [];
       for(let i=0; i < allStats.length; i++) {
         const stats = allStats[i];
         setLoadingText(`${t.loadingDrawing}${stats.repoPath}...`);
-        const cardPrompt = `A high-quality GitHub repository social preview card. 
-        Background: Gradient white.
-        Center: Huge bold text "${stats.repoPath}".
-        Description: Small text "${stats.description}".
-        Stats Row: Stars: ${stats.stars}, Forks: ${stats.forks}, Contributors: ${stats.contributors}, Issues: ${stats.issues}.
-        Visual: Tech logo on the right. Minimalist.`;
+        const cardPrompt = `A high-fidelity social sharing card for GitHub repository "${stats.repoPath}". 
+        Stats: ${stats.stars} Stars. Style: Sleek modern UI design, minimalist background, professional typography.`;
         
         const cardImg = await generateImage(cardPrompt, "16:9");
         if(cardImg) cards.push(cardImg);
@@ -525,11 +585,18 @@ const App = () => {
   const getProcessedHtml = () => {
     if (!article) return { __html: "" };
     let md = article;
+    // Fix: Using global replacement for indices to ensure all placeholders are swapped with images
     projectImages.forEach((img, idx) => {
       const placeholder = `\\[PROJECT_CARD_${idx}\\]`;
-      const imgHtml = `\n<div class="my-6 shadow-2xl rounded-2xl overflow-hidden border border-gray-100 bg-white"><img src="${img}" class="w-full h-auto" alt="Repository Card"></div>\n`;
+      const imgHtml = `\n<div class="my-6 shadow-2xl rounded-2xl overflow-hidden border border-gray-100 bg-white"><img src="${img}" class="w-full h-auto" alt="Repository Card ${idx}"></div>\n`;
       md = md.replace(new RegExp(placeholder, 'g'), imgHtml);
     });
+    // Fallback for literal INDEX word if LLM messed up
+    if (projectImages.length > 0) {
+      md = md.replace(/\[PROJECT_CARD_INDEX\]/g, (match, offset) => {
+        return `\n<div class="my-6 shadow-2xl rounded-2xl overflow-hidden border border-gray-100 bg-white"><img src="${projectImages[0]}" class="w-full h-auto" alt="Repository Card"></div>\n`;
+      });
+    }
     return { __html: marked.parse(md) as string };
   };
 
@@ -591,7 +658,7 @@ const App = () => {
 
   const getThemeStyles = () => `
     .prose-content { font-family: ${currentFont.value}; color: ${currentTheme.text}; }
-    .prose-content h1 { color: ${currentTheme.isGradientHeading ? 'transparent' : currentTheme.headingColor}; border-bottom-color: ${customPrimaryColor}; }
+    .prose-content h1 { color: ${currentTheme.headingColor}; border-bottom-color: ${customPrimaryColor}; }
     .prose-content h2::before { background: ${customPrimaryColor}; }
     .prose-content blockquote { background: ${currentTheme.secondaryBg}; border-left-color: ${customPrimaryColor}; }
     .prose-content strong { color: ${customPrimaryColor}; }
@@ -618,7 +685,7 @@ const App = () => {
              <div className="flex items-center gap-4">
                <span className="text-sm font-bold text-slate-500 uppercase tracking-widest">{t.quantity}:</span>
                <div className="flex bg-slate-900 p-1 rounded-2xl border border-slate-700 shadow-inner">
-                  {[1, 2, 3].map(n => (
+                  {[1, 2, 3, 4, 5].map(n => (
                     <button key={n} onClick={() => setTargetCount(n)} className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${targetCount === n ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>{n}</button>
                   ))}
                </div>
@@ -701,11 +768,19 @@ const App = () => {
         {showHistory && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={() => setShowHistory(false)}>
              <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
-                <div className="p-8 border-b border-white/5 flex justify-between items-center"><h3 className="font-bold text-xl">{t.recentGens}</h3><button onClick={() => setShowHistory(false)} className="text-slate-500 hover:text-white text-2xl">&times;</button></div>
+                <div className="p-8 border-b border-white/5 flex justify-between items-center">
+                  <h3 className="font-bold text-xl">{t.recentGens}</h3>
+                  <div className="flex gap-2">
+                    {history.length > 0 && <button onClick={clearAllHistory} className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors uppercase tracking-widest px-3 py-1 border border-red-500/20 rounded-lg">{t.clearAll}</button>}
+                    <button onClick={() => setShowHistory(false)} className="text-slate-500 hover:text-white text-2xl transition-colors">&times;</button>
+                  </div>
+                </div>
                 <div className="p-6 overflow-y-auto space-y-4">
                   {history.length === 0 ? <p className="text-center py-12 text-slate-600 italic">{t.noHistory}</p> : history.map(entry => (
                     <div key={entry.urls.join(',')} onClick={() => loadFromHistory(entry)} className="group bg-slate-800/40 hover:bg-slate-800 border border-white/5 p-5 rounded-2xl cursor-pointer transition-all flex items-center gap-6">
-                      <div className="w-16 h-16 rounded-xl bg-slate-700 overflow-hidden flex-shrink-0">{entry.headerImage && <img src={entry.headerImage} className="w-full h-full object-cover" />}</div>
+                      <div className="w-16 h-16 rounded-xl bg-slate-700 overflow-hidden flex-shrink-0">
+                        {entry.headerImage ? <img src={entry.headerImage} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-500 text-center p-1">No Img</div>}
+                      </div>
                       <div className="flex-1 min-w-0"><h4 className="font-bold text-slate-200 truncate group-hover:text-indigo-400 transition-colors">{entry.title}</h4><p className="text-xs text-slate-500 mt-1 truncate">{entry.urls.join(', ')}</p></div>
                       <button onClick={(e) => deleteFromHistory(e, entry.urls.join(','))} className="p-2 text-slate-600 hover:text-red-400 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button>
                     </div>
@@ -724,6 +799,39 @@ const App = () => {
                 </h3>
                 
                 <div className="space-y-6">
+                  {/* Visual Style Settings */}
+                  <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
+                    <h4 className="text-xs font-bold text-pink-400 uppercase tracking-widest mb-4">{t.visualStyle}</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.articleTheme}</label>
+                        <select 
+                          value={currentTheme.id} 
+                          onChange={e => {
+                            const theme = THEMES.find(th => th.id === e.target.value);
+                            if (theme) setCurrentTheme(theme);
+                          }} 
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm focus:border-pink-500 outline-none"
+                        >
+                          {THEMES.map(th => <option key={th.id} value={th.id}>{th.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.articleFont}</label>
+                        <select 
+                          value={currentFont.id} 
+                          onChange={e => {
+                            const font = FONTS.find(f => f.id === e.target.value);
+                            if (font) setCurrentFont(font);
+                          }} 
+                          className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm focus:border-pink-500 outline-none"
+                        >
+                          {FONTS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* LLM Platform Settings */}
                   <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
                     <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{t.llmEngine}</h4>
@@ -806,6 +914,8 @@ const App = () => {
                   <button onClick={() => { 
                     localStorage.setItem('wechatConfig', JSON.stringify(wechatConfig)); 
                     localStorage.setItem('llmConfig_v2', JSON.stringify(llmConfig));
+                    localStorage.setItem('git2wechat_theme', currentTheme.id);
+                    localStorage.setItem('git2wechat_font', currentFont.id);
                     setShowSettings(false); 
                   }} className="bg-indigo-600 px-10 py-2.5 rounded-xl text-white font-bold shadow-lg shadow-indigo-600/20 hover:bg-indigo-500">{t.save}</button>
                 </div>
