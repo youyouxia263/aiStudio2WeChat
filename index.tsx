@@ -49,6 +49,7 @@ interface ProjectStats {
   forks: string;
   contributors: string;
   issues: string;
+  avatars?: string[];
 }
 
 // --- Translations ---
@@ -423,7 +424,7 @@ const App = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: llmConfig.imageModel || 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `${prompt}. High resolution, sleek design, professional illustration.` }] },
+        contents: { parts: [{ text: `${prompt} masterpiece, best quality, ultra-detailed, 8k resolution, professional 3d render or vector illustration.` }] },
         config: { imageConfig: { aspectRatio: ratio } },
       });
       const data = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
@@ -452,24 +453,159 @@ const App = () => {
     }
   };
 
+  const formatNumber = (num: number): string => {
+    if (num === undefined || num === null) return "0";
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num.toString();
+  };
+
   const fetchProjectData = async (url: string): Promise<ProjectStats> => {
+    // 1. Extract repo path
+    let repoPath = "";
     try {
-      const prompt = `Fetch actual statistics for this GitHub repository: ${url}. 
-      Return as a JSON object with keys: repoPath (e.g., owner/repo), description (short 1-sentence), stars, forks, contributors, issues. 
-      Use ${lang === 'zh' ? 'Chinese' : 'English'} for the description.`;
-      const result = await executeTextTask(prompt, true);
-      return JSON.parse(result || '{}');
-    } catch (e) {
-      const parts = url.replace('https://github.com/', '').split('/');
-      return {
-        repoPath: `${parts[0]}/${parts[1]}` || "unknown/repo",
-        description: lang === 'zh' ? "创新的开源项目。" : "Innovative open-source project.",
-        stars: "Unknown",
-        forks: "Unknown",
-        contributors: "Many",
-        issues: "Active"
-      };
+      const urlObj = new URL(url);
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      if (parts.length >= 2) repoPath = `${parts[0]}/${parts[1]}`;
+    } catch (e) { console.error(e); }
+
+    // 2. Try GitHub API
+    if (repoPath) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${repoPath}`);
+        if (res.ok) {
+          const data = await res.json();
+          
+          // Get localized description
+          const descPrompt = `Translate this project description to ${lang === 'zh' ? 'Chinese' : 'English'} (keep it concise): "${data.description || 'No description'}"`;
+          const description = await executeTextTask(descPrompt, false);
+
+          let contributors = "Many";
+          let avatars: string[] = [];
+
+          try {
+             // Fetch contributors using per_page=1 to get the Last Page from Link header for count
+             const contribRes = await fetch(`https://api.github.com/repos/${repoPath}/contributors?per_page=1&anon=true`);
+             if (contribRes.ok) {
+                 const link = contribRes.headers.get('link');
+                 if (link) {
+                     // Parse the "last" page number from the Link header
+                     const match = link.split(',').find(s => s.includes('rel="last"'))?.match(/[?&]page=(\d+)/);
+                     if (match) {
+                         contributors = formatNumber(parseInt(match[1], 10));
+                     }
+                 } else {
+                     // If no link header, check array length
+                     const cData = await contribRes.json();
+                     if (Array.isArray(cData)) contributors = cData.length.toString();
+                 }
+             }
+
+             // Fetch avatars separately (limit 5)
+             const avatarRes = await fetch(`https://api.github.com/repos/${repoPath}/contributors?per_page=5&anon=true`);
+             if (avatarRes.ok) {
+                 const avData = await avatarRes.json();
+                 if (Array.isArray(avData)) {
+                     avatars = avData.map((u: any) => u.avatar_url);
+                 }
+             }
+          } catch(e) {
+              console.warn("Contrib fetch error", e);
+          }
+
+          return {
+            repoPath: data.full_name,
+            description: description.trim(),
+            stars: formatNumber(data.stargazers_count),
+            forks: formatNumber(data.forks_count),
+            contributors: contributors,
+            avatars: avatars,
+            issues: formatNumber(data.open_issues_count)
+          };
+        }
+      } catch (e) {
+        console.warn("GitHub API error, falling back to LLM", e);
+      }
     }
+
+    // 3. Fallback: LLM with Search (force text mode to use tools, then parse JSON)
+    try {
+      const prompt = `Search for current GitHub stats for ${url} including exact number of contributors. Return ONLY a valid JSON string: {"repoPath": "${repoPath || 'owner/repo'}", "description": "...", "stars": "10k", "forks": "2k", "contributors": "100+", "issues": "50"}. Description language: ${lang === 'zh' ? 'Chinese' : 'English'}.`;
+      const result = await executeTextTask(prompt, false);
+      const jsonMatch = result.match(/\{[\s\S]*\}/);
+      if (jsonMatch) return JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      console.error("LLM Fallback error", e);
+    }
+
+    return {
+      repoPath: repoPath || "unknown/repo",
+      description: "Innovative open-source project.",
+      stars: "?",
+      forks: "?",
+      contributors: "?",
+      issues: "?",
+      avatars: []
+    };
+  };
+
+  const compositeAvatars = async (baseImg: string, avatarUrls: string[]): Promise<string> => {
+    if (!avatarUrls || avatarUrls.length === 0) return baseImg;
+    
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(baseImg);
+
+      const img = new Image();
+      img.onload = async () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        // Avatar config
+        const size = canvas.width * 0.08;
+        const spacing = size * 0.6;
+        // Position: Bottom Right
+        const startX = canvas.width - (avatarUrls.length * spacing) - size - (canvas.width * 0.05);
+        const startY = canvas.height - size - (canvas.height * 0.08);
+
+        // Load all avatars
+        const loadedAvatars = await Promise.all(avatarUrls.map(url => new Promise<HTMLImageElement | null>(r => {
+            const i = new Image();
+            i.crossOrigin = 'anonymous'; // Important for GitHub images
+            i.onload = () => r(i);
+            i.onerror = () => r(null);
+            i.src = url;
+        })));
+
+        loadedAvatars.forEach((avImg, i) => {
+            if (!avImg) return;
+            const x = startX + i * spacing;
+            const y = startY;
+
+            // Draw circular avatar with clip
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(x + size/2, y + size/2, size/2, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(avImg, x, y, size, size);
+            ctx.restore();
+
+            // White Border
+            ctx.beginPath();
+            ctx.arc(x + size/2, y + size/2, size/2, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = size * 0.08;
+            ctx.stroke();
+        });
+
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(baseImg);
+      img.crossOrigin = 'anonymous'; 
+      img.src = baseImg;
+    });
   };
 
   const generateArticle = async (passedUrls?: string[]) => {
@@ -524,18 +660,26 @@ const App = () => {
       const title = titleMatch ? titleMatch[1].trim() : (lang === 'zh' ? `精选开源项目: ${repoNamesStr}` : `Featured Projects: ${repoNamesStr}`);
       
       setLoadingText(t.loadingDesigning);
-      const mainCover = await generateImage(`A professional, high-impact WeChat blog cover illustration for a post titled "${title}". Cyberpunk tech aesthetic.`);
+      const mainCover = await generateImage(`Editorial style illustration for a tech blog post titled "${title}". abstract 3d geometric shapes, vibrant gradient lighting (purple to cyan), futuristic composition, isometric perspective, clean background, trending on dribbble`);
       setHeaderImage(mainCover);
 
       const cards: string[] = [];
       for(let i=0; i < allStats.length; i++) {
         const stats = allStats[i];
         setLoadingText(`${t.loadingDrawing}${stats.repoPath}...`);
-        const cardPrompt = `A high-fidelity social sharing card for GitHub repository "${stats.repoPath}". 
-        Stats: ${stats.stars} Stars. Style: Sleek modern UI design, minimalist background, professional typography.`;
+        
+        // Updated prompt to include explicit stats and request space for avatars
+        const cardPrompt = `A sleek, modern UI card design for GitHub repository "${stats.repoPath}". 
+        Prominently display stats in the center or left: "${stats.stars} Stars" and "${stats.forks} Forks". 
+        Leave empty space at the bottom right for contributor avatars.
+        Style: Glassmorphism, soft shadows, minimal abstract tech pattern background, high contrast text, premium design aesthetics.`;
         
         const cardImg = await generateImage(cardPrompt, "16:9");
-        if(cardImg) cards.push(cardImg);
+        let finalCard = cardImg;
+        if(cardImg && stats.avatars && stats.avatars.length > 0) {
+           finalCard = await compositeAvatars(cardImg, stats.avatars);
+        }
+        if(finalCard) cards.push(finalCard);
       }
       setProjectImages(cards);
 

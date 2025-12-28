@@ -1,5 +1,5 @@
 {
-  "name": "Git2WeChat Article Generator",
+  "name": "github项目介绍公众号文章生成app",
   "description": "Instantly convert any GitHub repository URL into a structured, aesthetically pleasing WeChat Official Account (公众号) tech article using Gemini 2.5 Flash and Search Grounding.",
   "requestFramePermissions": []
 }
