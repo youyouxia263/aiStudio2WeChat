@@ -1,20 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Git2WeChat Pro - 智能公众号文章生成器
 
-# Run and deploy your AI Studio app
+## 简介
 
-This contains everything you need to run your app locally.
+**Git2WeChat Pro** 是一款专为技术博主和公众号运营者打造的 AI 效率工具。利用 Google Gemini 等先进大模型的多模态能力，它可以一键将 GitHub 仓库链接转化为排版精美、内容详实、且包含专业视觉卡片的微信公众号文章。
 
-View your app in AI Studio: https://ai.studio/apps/drive/1v3QCeiADtV6N-5HKjFYkrnMr_NCPDlcJ
+无需手动截图、翻译文档或设计封面，Git2WeChat Pro 帮您全自动搞定，让技术分享更简单、更高效。
 
-## Run Locally
+## ✨ 核心功能
 
-**Prerequisites:**  Node.js
+*   **🚀 智能数据解析**: 
+    *   自动调用 GitHub API 获取仓库的 Star、Fork、Issue 数量。
+    *   精准计算贡献者（Contributors）数量（支持自动翻页统计）。
+    *   抓取前排贡献者头像。
+*   **📝 AI 深度写作**: 
+    *   生成符合微信阅读习惯的 Viral 风格文章。
+    *   自动构建清晰的章节结构：核心功能、快速开始、应用场景等。
+    *   智能优化排版，使用列表和代码块提升可读性。
+*   **🎨 自动化视觉设计**:
+    *   **AI 绘图**: 根据项目内容自动生成高质量的文章头图。
+    *   **动态卡片**: 为每个项目生成专属的数据展示卡片（Glassmorphism 玻璃拟态风格）。
+    *   **头像合成**: 自动将真实的 GitHub 贡献者头像合成到项目卡片中，增加真实感。
+*   **🌍 多语言与多模型**: 
+    *   支持中/英双语界面与内容生成。
+    *   兼容多种 LLM 服务商：Google Gemini (默认), 阿里百炼 (Qwen), 火山引擎 (Doubao), 以及 OpenAI 兼容接口。
+*   **🔮 魔法发现**: 内置 AI 推荐引擎，一键发现热门趋势或 AI 精选项目。
+*   **🛠 个性化定制**:
+    *   提供多种文章视觉主题（标准白、赛博朋克、午夜蓝）。
+    *   支持字体切换与自定义配色。
+*   **📋 一键发布**:
+    *   **复制微信格式**: 完美保留样式与代码高亮，直接粘贴至公众号后台。
+    *   **复制 Markdown**: 获取源码以便二次编辑。
 
+## 📖 使用指南
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1.  **配置 API Key**:
+    *   项目默认读取环境变量中的 API Key。
+    *   您也可以在“系统设置”中手动配置其他服务商的模型参数。
+2.  **输入仓库地址**:
+    *   在首页输入框粘贴 GitHub 仓库链接 (例如: `https://github.com/facebook/react`)。
+    *   或者点击“✨ 热门趋势”让 AI 为您寻找灵感。
+3.  **生成文章**:
+    *   点击“开始生成视觉文章”按钮。
+    *   系统将并行处理数据抓取、文本生成与图像绘制合成。
+4.  **预览与导出**:
+    *   在右侧实时预览生成效果。
+    *   点击“复制微信格式”，然后前往微信公众号编辑器粘贴即可。
+
+## ⚙️ 技术栈
+
+*   **前端框架**: React 18
+*   **样式方案**: Tailwind CSS
+*   **AI SDK**: `@google/genai` (Gemini API)
+*   **Markdown 渲染**: `marked`
+*   **代码高亮**: `highlight.js`
+*   **图像处理**: HTML5 Canvas (用于头像与背景图的合成)
+
+## ⚠️ 免责声明
+
+本项目生成的文章内容基于大模型推理，虽然经过 Prompt 优化，但建议在发布前进行人工校对，以确保技术细节的绝对准确。

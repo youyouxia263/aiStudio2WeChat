@@ -50,6 +50,7 @@ interface ProjectStats {
   contributors: string;
   issues: string;
   avatars?: string[];
+  images?: string[]; // New: Images extracted from README
 }
 
 // --- Translations ---
@@ -73,7 +74,7 @@ const i18n = {
     urlLabel: "仓库地址",
     words: "字数",
     cards: "视觉卡片",
-    loadingAnalyzing: "正在分析仓库...",
+    loadingAnalyzing: "正在深入分析代码库...",
     loadingRetrieving: "正在检索数据: ",
     loadingDesigning: "正在设计封面图...",
     loadingDrawing: "正在绘制卡片: ",
@@ -126,7 +127,7 @@ const i18n = {
     urlLabel: "Repo URL",
     words: "Words",
     cards: "Cards",
-    loadingAnalyzing: "Analyzing Repositories...",
+    loadingAnalyzing: "Deeply analyzing repository...",
     loadingRetrieving: "Retrieving data: ",
     loadingDesigning: "Designing Cover Artwork",
     loadingDrawing: "Drawing card: ",
@@ -213,6 +214,53 @@ const FONTS = [
   { id: 'serif', name: 'Serif', value: "'Noto Serif SC', serif" },
   { id: 'mono', name: 'Monospace', value: "'JetBrains Mono', monospace" },
 ];
+
+// --- Helper Functions ---
+
+const extractImagesFromMarkdown = (markdown: string, repoPath: string, defaultBranch: string): string[] => {
+  const images: string[] = [];
+  const rawBase = `https://raw.githubusercontent.com/${repoPath}/${defaultBranch}`;
+  
+  // 1. Markdown images: ![alt](url)
+  const mdRegex = /!\[.*?\]\((.*?)\)/g;
+  let match;
+  while ((match = mdRegex.exec(markdown)) !== null) {
+    let url = match[1].trim();
+    if (!url) continue;
+    // Basic filtering for badges/icons/shields
+    if (url.match(/(shield\.io|badge|travis|ci|codecov|circleci|icon|logo|avatar|npm)/i)) continue;
+
+    if (!url.startsWith('http')) {
+        // Resolve relative URL
+        // Clean leading ./ or /
+        let cleanPath = url.replace(/^(\.\/|\/)/, '');
+        url = `${rawBase}/${cleanPath}`;
+    } else {
+        // Fix github blob URLs to raw
+        url = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+    }
+    images.push(url);
+  }
+
+  // 2. HTML images: <img src="url">
+  const htmlRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  while ((match = htmlRegex.exec(markdown)) !== null) {
+    let url = match[1].trim();
+    if (!url) continue;
+    if (url.match(/(shield\.io|badge|travis|ci|codecov|circleci|icon|logo|avatar|npm)/i)) continue;
+
+    if (!url.startsWith('http')) {
+        let cleanPath = url.replace(/^(\.\/|\/)/, '');
+        url = `${rawBase}/${cleanPath}`;
+    } else {
+        url = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+    }
+    images.push(url);
+  }
+
+  // Deduplicate and limit to 3 high quality candidates
+  return Array.from(new Set(images)).slice(0, 3);
+};
 
 const App = () => {
   const [lang, setLang] = useState<Language>('zh');
@@ -420,11 +468,14 @@ const App = () => {
   };
 
   const generateImage = async (prompt: string, ratio: "1:1" | "16:9" = "16:9"): Promise<string | null> => {
+    // We append general quality boosters but remove specific styles like '3d render' to allow the prompt to dictate style
+    const qualitySuffix = "masterpiece, best quality, ultra-detailed, 8k resolution, trending on ArtStation.";
+    
     if (llmConfig.provider === 'gemini') {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: llmConfig.imageModel || 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `${prompt} masterpiece, best quality, ultra-detailed, 8k resolution, professional 3d render or vector illustration.` }] },
+        contents: { parts: [{ text: `${prompt} ${qualitySuffix}` }] },
         config: { imageConfig: { aspectRatio: ratio } },
       });
       const data = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
@@ -512,6 +563,24 @@ const App = () => {
               console.warn("Contrib fetch error", e);
           }
 
+          // Fetch README for images
+          let extractedImages: string[] = [];
+          try {
+             // We need the default branch first. 'data' has it.
+             const defaultBranch = data.default_branch || 'main';
+             
+             const readmeRes = await fetch(`https://api.github.com/repos/${repoPath}/readme`);
+             if (readmeRes.ok) {
+                 const readmeJson = await readmeRes.json();
+                 // download_url is the raw text url
+                 if (readmeJson.download_url) {
+                    const rawRes = await fetch(readmeJson.download_url);
+                    const rawText = await rawRes.text();
+                    extractedImages = extractImagesFromMarkdown(rawText, repoPath, defaultBranch);
+                 }
+             }
+          } catch (e) { console.warn("Readme image fetch failed", e); }
+
           return {
             repoPath: data.full_name,
             description: description.trim(),
@@ -519,7 +588,8 @@ const App = () => {
             forks: formatNumber(data.forks_count),
             contributors: contributors,
             avatars: avatars,
-            issues: formatNumber(data.open_issues_count)
+            issues: formatNumber(data.open_issues_count),
+            images: extractedImages
           };
         }
       } catch (e) {
@@ -634,23 +704,48 @@ const App = () => {
 
       const repoNamesStr = allStats.map(s => s.repoPath).join('、');
       
-      const prompt = `You are an expert tech blogger and WeChat SEO specialist. Write a viral article for a WeChat Official Account.
-      Featured Repositories:
-      ${allStats.map((s, i) => `${i+1}. ${s.repoPath}: ${s.description}`).join('\n')}
+      const prompt = `
+      **角色设定 (Role)**: 你是一位在技术圈摸爬滚打多年的“老司机”博主（Key Opinion Leader），你的粉丝都是开发者。你的写作风格是：**热心、直率、接地气、稍微带点幽默感**。你不是在写说明书，而是在给好朋友安利好东西。
       
-      Requirements:
-      1. Use ${lang === 'zh' ? 'Simplified Chinese' : 'English'}.
-      2. CHAPTER STRUCTURE & TITLING: 
-         - Use # for the main title. 
-         - The title MUST include the names of ALL featured repositories: ${repoNamesStr}.
-         - Use ## for each project entry (e.g., "## 01. [REPO_PATH]").
-         - Use ### for sub-sections.
-      3. **CRITICAL**: Immediately below EACH "##" project heading, you MUST insert a placeholder like "[PROJECT_CARD_0]", "[PROJECT_CARD_1]", etc., corresponding to the project's index in the list.
-         Example: 
-         ## 01. facebook/react
-         [PROJECT_CARD_0]
-         React is a library...
-      4. Output strictly in Markdown.`;
+      **任务**: 为以下 GitHub 项目写一篇微信公众号文章。
+      
+      **项目列表**:
+      ${allStats.map((s, i) => {
+          let info = `${i+1}. ${s.repoPath} (https://github.com/${s.repoPath}): ${s.description}`;
+          if (s.images && s.images.length > 0) {
+              info += `\n   参考图片 (必须在文中合适位置插入至少一张): \n   ${s.images.join('\n   ')}`;
+          }
+          return info;
+      }).join('\n')}
+      
+      **核心写作原则 (Critical Style Rules)**:
+      1.  **🚫 拒绝“AI味”**: 
+          - 绝对禁止使用：“在当今数字化时代”、“革命性的”、“综上所述”、“总而言之”、“毋庸置疑”、“不仅...而且...”、“赋能”、“抓手”、“闭环”这种机器翻译腔或黑话。
+          - 不要用“首先、其次、最后”这种僵硬的列表，换成“第一点”、“最棒的是”、“还有个坑要注意”这种口语。
+          - 不要像写论文一样写文章。
+      2.  **🗣 增加“人味”**:
+          - **必须使用第一人称** (“我最近发现...”，“咱们做开发的...”)。
+          - **痛点驱动 (Start with Pain)**: 不要上来就介绍功能。先描述一个开发者日常遇到的抓狂场景（比如：配环境配到哭、改Bug改到头秃、加班写重复代码），然后引出这个项目是“救星”。
+          - **加入个人情绪**: 可以说“这功能简直绝了！”、“我当时看到都惊呆了”、“这个设计真的很贴心”。
+          - **通俗类比 (Explain Like I'm 5)**: 遇到抽象的技术概念，必须用生活中的例子做类比（比如：把 Kubernetes 比作 交通指挥官，把 Cache 比作 随身小抄）。
+      
+      **文章结构 (Structure)**:
+      1.  **大标题 (#)**: 必须包含所有项目名称 (${repoNamesStr})，标题要极其吸引人，像“震惊部”但要有技术含量（例如：“别再造轮子了！这款神器...”）。
+      2.  **正文**:
+          - 每个项目使用二级标题 (##)。
+          - **CRITICAL**: 在每个 ## 标题下方立即插入占位符 [PROJECT_CARD_${allStats.length > 1 ? 'N' : '0'}] (其中 N 是索引，从0开始)。
+          - **内容模块**: 
+             - 😫 **以前有多惨**: (痛点描述，简短有力，引起共鸣)
+             - 😎 **它能干什么**: (大白话解释核心价值)
+             - ✨ **高光时刻**: (3-4个亮点，用口语化列表)
+             - 🌰 **举个栗子 / 上手试试**: (必须有一段最简单的代码示例 Code Block，让读者觉得容易上手)
+             - 🖼 **图片**: 如果上面提供了参考图片 URL，请务必用 Markdown 图片语法插入。
+      3.  **结尾**:
+          - 简短总结，鼓励大家去 GitHub 点 Star。
+      4.  **语言**: 使用 ${lang === 'zh' ? '中文 (Simplified Chinese)' : 'English'}，用词要现代、Geek 一点。
+      
+      **输出格式**: 纯 Markdown。不要包含任何 JSON 或其他非 Markdown 内容。
+      `;
 
       const resultText = await executeTextTask(prompt);
       setArticle(resultText || "No content generated.");
@@ -660,7 +755,15 @@ const App = () => {
       const title = titleMatch ? titleMatch[1].trim() : (lang === 'zh' ? `精选开源项目: ${repoNamesStr}` : `Featured Projects: ${repoNamesStr}`);
       
       setLoadingText(t.loadingDesigning);
-      const mainCover = await generateImage(`Editorial style illustration for a tech blog post titled "${title}". abstract 3d geometric shapes, vibrant gradient lighting (purple to cyan), futuristic composition, isometric perspective, clean background, trending on dribbble`);
+      // Enhanced Header Prompt: More specific about 3D style and color palette.
+      const headerPrompt = `Masterpiece 3D isometric editorial illustration for a tech article titled "${title}". 
+      Style: Futuristic Glassmorphism mixed with soft 3D shapes. 
+      Colors: Vibrant gradient of Indigo, Violet, and Emerald Green against a dark slate background. 
+      Elements: Abstract floating code symbols, git branches, and cloud infrastructure icons. 
+      Lighting: Cinematic studio lighting, volumetric glow. 
+      Quality: 8k, Unreal Engine 5 render style, ultra-detailed, sharp focus.`;
+      
+      const mainCover = await generateImage(headerPrompt);
       setHeaderImage(mainCover);
 
       const cards: string[] = [];
@@ -668,11 +771,13 @@ const App = () => {
         const stats = allStats[i];
         setLoadingText(`${t.loadingDrawing}${stats.repoPath}...`);
         
-        // Updated prompt to include explicit stats and request space for avatars
-        const cardPrompt = `A sleek, modern UI card design for GitHub repository "${stats.repoPath}". 
-        Prominently display stats in the center or left: "${stats.stars} Stars" and "${stats.forks} Forks". 
-        Leave empty space at the bottom right for contributor avatars.
-        Style: Glassmorphism, soft shadows, minimal abstract tech pattern background, high contrast text, premium design aesthetics.`;
+        // Enhanced Card Prompt: Specific "Flat/Clean" professional UI style
+        const cardPrompt = `High-fidelity UI component card for GitHub repository "${stats.repoPath}".
+        Text Display: Large bold typography for "${stats.stars} Stars" and "${stats.forks} Forks" in white.
+        Visual Style: Dark mode frosted glass (Glassmorphism) with a glowing gradient border.
+        Background: Deep abstract tech pattern (circuit or mesh).
+        Composition: Stats on the left/center. IMPORTANT: Leave the bottom-right corner empty and clean for avatar overlays.
+        Vibe: Professional, slick, developer-focused.`;
         
         const cardImg = await generateImage(cardPrompt, "16:9");
         let finalCard = cardImg;
@@ -937,139 +1042,102 @@ const App = () => {
         {showSettings && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={() => setShowSettings(false)}>
              <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-xl p-8 flex flex-col shadow-2xl overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                <h3 className="font-bold text-xl mb-6 flex items-center gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                  {t.globalSettings}
-                </h3>
-                
-                <div className="space-y-6">
-                  {/* Visual Style Settings */}
-                  <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
-                    <h4 className="text-xs font-bold text-pink-400 uppercase tracking-widest mb-4">{t.visualStyle}</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.articleTheme}</label>
-                        <select 
-                          value={currentTheme.id} 
-                          onChange={e => {
-                            const theme = THEMES.find(th => th.id === e.target.value);
-                            if (theme) setCurrentTheme(theme);
-                          }} 
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm focus:border-pink-500 outline-none"
-                        >
-                          {THEMES.map(th => <option key={th.id} value={th.id}>{th.name}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.articleFont}</label>
-                        <select 
-                          value={currentFont.id} 
-                          onChange={e => {
-                            const font = FONTS.find(f => f.id === e.target.value);
-                            if (font) setCurrentFont(font);
-                          }} 
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm focus:border-pink-500 outline-none"
-                        >
-                          {FONTS.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                        </select>
-                      </div>
-                    </div>
+               <div className="flex justify-between items-center mb-8 border-b border-white/5 pb-4">
+                 <h3 className="font-bold text-xl">{t.globalSettings}</h3>
+                 <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-white transition-colors text-2xl">&times;</button>
+               </div>
+               
+               <div className="space-y-8">
+                  <div className="space-y-4">
+                     <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">{t.visualStyle}</h4>
+                     <div className="grid grid-cols-3 gap-3">
+                        {THEMES.map(theme => (
+                          <button 
+                            key={theme.id}
+                            onClick={() => setCurrentTheme(theme)}
+                            className={`p-3 rounded-xl border text-xs font-bold transition-all flex flex-col items-center gap-2 ${currentTheme.id === theme.id ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                          >
+                             <div className="w-6 h-6 rounded-full border border-white/20" style={{ background: theme.bg }}></div>
+                             {theme.name}
+                          </button>
+                        ))}
+                     </div>
+                     <div className="grid grid-cols-3 gap-3">
+                        {FONTS.map(font => (
+                          <button 
+                            key={font.id}
+                            onClick={() => setCurrentFont(font)}
+                            className={`p-3 rounded-xl border text-xs font-bold transition-all ${currentFont.id === font.id ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                          >
+                             {font.name}
+                          </button>
+                        ))}
+                     </div>
                   </div>
 
-                  {/* LLM Platform Settings */}
-                  <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
-                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4">{t.llmEngine}</h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.provider}</label>
-                        <select 
-                          value={llmConfig.provider} 
-                          onChange={e => changeProvider(e.target.value as LLMProvider)} 
-                          className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm focus:border-indigo-500 outline-none"
-                        >
-                          <option value="gemini">{t.gemini}</option>
-                          <option value="alibaba">{t.alibaba}</option>
-                          <option value="volcengine">{t.volcengine}</option>
-                          <option value="custom">{t.custom}</option>
-                        </select>
-                      </div>
-                      
-                      {llmConfig.provider !== 'gemini' && (
-                        <div className="animate-in fade-in slide-in-from-top-2 duration-300 space-y-4">
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">{t.llmEngine}</h4>
+                    <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-700">
+                      {(['gemini', 'alibaba', 'volcengine', 'custom'] as LLMProvider[]).map(p => (
+                        <button key={p} onClick={() => changeProvider(p)} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${llmConfig.provider === p ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>
+                          {t[p]}
+                        </button>
+                      ))}
+                    </div>
+                    {llmConfig.provider !== 'gemini' && (
+                       <div className="space-y-3 bg-slate-800/50 p-4 rounded-xl border border-white/5">
                           <div>
-                            <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.baseUrl}</label>
-                            <input 
-                              type="text" 
-                              value={llmConfig.baseUrl} 
-                              onChange={e => setLlmConfig({...llmConfig, baseUrl: e.target.value})} 
-                              className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500" 
-                              placeholder="https://api.provider.com/v1"
-                            />
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.baseUrl}</label>
+                            <input type="text" value={llmConfig.baseUrl} onChange={(e) => setLlmConfig({...llmConfig, baseUrl: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
                           </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.textModel}</label>
-                              <input 
-                                type="text" 
-                                value={llmConfig.model} 
-                                onChange={e => setLlmConfig({...llmConfig, model: e.target.value})} 
-                                className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500" 
-                                placeholder="e.g. qwen-max"
-                              />
+                          <div className="flex gap-3">
+                            <div className="flex-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.textModel}</label>
+                              <input type="text" value={llmConfig.model} onChange={(e) => setLlmConfig({...llmConfig, model: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
                             </div>
-                            <div>
-                              <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.imageModel}</label>
-                              <input 
-                                type="text" 
-                                value={llmConfig.imageModel} 
-                                onChange={e => setLlmConfig({...llmConfig, imageModel: e.target.value})} 
-                                className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-indigo-500" 
-                                placeholder="e.g. wanx-v1"
-                              />
+                            <div className="flex-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.imageModel}</label>
+                              <input type="text" value={llmConfig.imageModel} onChange={(e) => setLlmConfig({...llmConfig, imageModel: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
                             </div>
                           </div>
+                       </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                     <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">{t.wechatApi}</h4>
+                     <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 space-y-3">
+                        <div className="flex gap-3">
+                           <div className="flex-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.appId}</label>
+                              <input type="text" value={wechatConfig.appId} onChange={(e) => setWechatConfig({...wechatConfig, appId: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                           </div>
+                           <div className="flex-1">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.appSecret}</label>
+                              <input type="password" value={wechatConfig.appSecret} onChange={(e) => setWechatConfig({...wechatConfig, appSecret: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                           </div>
                         </div>
-                      )}
-                    </div>
+                        <p className="text-[10px] text-emerald-400/80 bg-emerald-900/20 p-2 rounded-lg border border-emerald-500/20">{t.proTip}</p>
+                     </div>
                   </div>
+               </div>
 
-                  {/* WeChat API Settings */}
-                  <div className="bg-white/5 p-5 rounded-2xl border border-white/5">
-                    <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-4">{t.wechatApi}</h4>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.appId}</label>
-                        <input type="text" value={wechatConfig.appId} onChange={e => setWechatConfig({...wechatConfig, appId: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-emerald-500" placeholder="wxfxxxxxxxxxxxxxxx" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 block uppercase mb-1.5">{t.appSecret}</label>
-                        <input type="password" value={wechatConfig.appSecret} onChange={e => setWechatConfig({...wechatConfig, appSecret: e.target.value})} className="w-full bg-slate-800 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-emerald-500" placeholder="********************************" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
-                    <p className="text-[10px] text-indigo-300 leading-relaxed uppercase font-bold">{t.proTip}</p>
-                  </div>
-                </div>
-
-                <div className="mt-8 flex justify-end gap-3">
-                  <button onClick={() => setShowSettings(false)} className="px-6 py-2.5 text-slate-400 font-bold hover:text-white">{t.cancel}</button>
-                  <button onClick={() => { 
-                    localStorage.setItem('wechatConfig', JSON.stringify(wechatConfig)); 
-                    localStorage.setItem('llmConfig_v2', JSON.stringify(llmConfig));
-                    localStorage.setItem('git2wechat_theme', currentTheme.id);
-                    localStorage.setItem('git2wechat_font', currentFont.id);
-                    setShowSettings(false); 
-                  }} className="bg-indigo-600 px-10 py-2.5 rounded-xl text-white font-bold shadow-lg shadow-indigo-600/20 hover:bg-indigo-500">{t.save}</button>
-                </div>
+               <div className="mt-8 pt-6 border-t border-white/5 flex justify-end gap-3">
+                  <button onClick={() => setShowSettings(false)} className="px-5 py-2 rounded-xl text-sm font-bold text-slate-400 hover:bg-slate-800 transition-colors">{t.cancel}</button>
+                  <button onClick={() => {
+                     localStorage.setItem('wechatConfig', JSON.stringify(wechatConfig));
+                     localStorage.setItem('llmConfig_v2', JSON.stringify(llmConfig));
+                     setShowSettings(false);
+                  }} className="px-6 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg transition-all active:translate-y-0.5">{t.save}</button>
+               </div>
              </div>
           </div>
         )}
+
       </div>
     </div>
   );
 };
 
-const root = createRoot(document.getElementById("root")!);
+const root = createRoot(document.getElementById("root"));
 root.render(<App />);
