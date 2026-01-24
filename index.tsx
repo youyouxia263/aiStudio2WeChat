@@ -65,6 +65,7 @@ const i18n = {
     generate: "开始生成视觉文章",
     copyWeChat: "复制微信格式",
     copyMarkdown: "Markdown 源码",
+    genPoster: "生成分享海报",
     pushDraft: "推送至草稿箱",
     edit: "编辑文本",
     preview: "预览效果",
@@ -78,7 +79,8 @@ const i18n = {
     loadingRetrieving: "正在检索数据: ",
     loadingDesigning: "正在设计封面图...",
     loadingDrawing: "正在绘制卡片: ",
-    loadingTrending: "正在发现热门项目...",
+    loadingTrending: "正在抓取 GitHub Trending...",
+    loadingPoster: "正在绘制海报...",
     copySuccess: "已复制微信排版格式！直接粘贴到公众号编辑器即可。",
     mdSuccess: "Markdown 源码已复制！",
     pushSuccess: "文章已成功推送至微信草稿箱！",
@@ -107,7 +109,13 @@ const i18n = {
     storageFull: "存储空间不足，已自动清理旧记录图片。",
     visualStyle: "视觉风格",
     articleTheme: "文章主题",
-    articleFont: "文章字体"
+    articleFont: "文章字体",
+    posterTitle: "朋友圈分享海报",
+    posterDesc: "长按保存图片，分享到朋友圈或群聊",
+    downloadPoster: "下载海报",
+    humanize: "拟人化润色 (Humanizer)",
+    humanizing: "正在进行拟人化重写...",
+    humanizeSuccess: "文章已完成去 AI 化润色！"
   },
   en: {
     title: "Git2WeChat Pro",
@@ -118,6 +126,7 @@ const i18n = {
     generate: "GENERATE VISUAL ARTICLE",
     copyWeChat: "Copy WeChat Format",
     copyMarkdown: "Markdown",
+    genPoster: "Generate Poster",
     pushDraft: "Push to Drafts",
     edit: "Edit Text",
     preview: "Preview",
@@ -131,7 +140,8 @@ const i18n = {
     loadingRetrieving: "Retrieving data: ",
     loadingDesigning: "Designing Cover Artwork",
     loadingDrawing: "Drawing card: ",
-    loadingTrending: "Discovering trending repos...",
+    loadingTrending: "Scraping GitHub Trending...",
+    loadingPoster: "Drawing poster...",
     copySuccess: "WeChat format copied! Paste it directly into the editor.",
     mdSuccess: "Markdown source copied!",
     pushSuccess: "Article pushed to WeChat Drafts successfully!",
@@ -160,7 +170,13 @@ const i18n = {
     storageFull: "Storage nearly full. Old entry images pruned.",
     visualStyle: "Visual Style",
     articleTheme: "Article Theme",
-    articleFont: "Article Font"
+    articleFont: "Article Font",
+    posterTitle: "Social Share Poster",
+    posterDesc: "Long press to save and share",
+    downloadPoster: "Download Image",
+    humanize: "Humanize Text",
+    humanizing: "Humanizing text...",
+    humanizeSuccess: "Text successfully humanized!"
   }
 };
 
@@ -217,49 +233,105 @@ const FONTS = [
 
 // --- Helper Functions ---
 
+const fetchGithubTrending = async (): Promise<string[]> => {
+  try {
+    // Use allorigins to bypass CORS for github.com/trending
+    // This fetches the raw HTML of the trending page
+    const res = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://github.com/trending?since=daily'));
+    if (!res.ok) throw new Error("Failed to fetch trending");
+    const html = await res.text();
+    
+    // Simple regex to extract repo paths from the HTML.
+    // The structure typically involves <article class="Box-row"> ... <h2 class="h3 lh-condensed"> <a href="/owner/repo">
+    // We look for the h2 -> a pattern.
+    const regex = /<h2[^>]*>\s*<a[^>]*href=["']\/?([^"']+)["'][^>]*>/g;
+    const matches: string[] = [];
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      // match[1] captures 'owner/repo'
+      // We filter out duplicates and ensure it looks like a repo path
+      const path = match[1];
+      if (path && path.split('/').length === 2 && !matches.includes(`https://github.com/${path}`)) {
+         matches.push(`https://github.com/${path}`);
+      }
+      if (matches.length >= 10) break; // Fetch a few more than needed to be safe
+    }
+    return matches;
+  } catch (e) {
+    console.error("Trending scrape failed", e);
+    return [];
+  }
+};
+
 const extractImagesFromMarkdown = (markdown: string, repoPath: string, defaultBranch: string): string[] => {
-  const images: string[] = [];
+  const candidates: { url: string; score: number }[] = [];
   const rawBase = `https://raw.githubusercontent.com/${repoPath}/${defaultBranch}`;
   
-  // 1. Markdown images: ![alt](url)
-  const mdRegex = /!\[.*?\]\((.*?)\)/g;
-  let match;
-  while ((match = mdRegex.exec(markdown)) !== null) {
-    let url = match[1].trim();
-    if (!url) continue;
-    // Basic filtering for badges/icons/shields
-    if (url.match(/(shield\.io|badge|travis|ci|codecov|circleci|icon|logo|avatar|npm)/i)) continue;
+  // Scoring weights
+  const SCORE = {
+    FEATURE_KEYWORD: 10,
+    DIAGRAM_KEYWORD: 5,
+    ANIMATION: 8,
+    STANDARD: 1
+  };
 
+  const processUrl = (url: string, altText: string = "") => {
+    url = url.trim();
+    if (!url) return;
+    
+    // 1. Filter Blocklist (Badges, CI, Sponsors, Avatars, Tiny Icons)
+    // Common badge/shield patterns and analytics pixels
+    if (url.match(/(shield\.io|badge|travis|ci|codecov|circleci|icon|logo|npm|sponsors|backers|contributors|graph|hit|activity|analytics|tracker)/i)) return;
+    // GitHub specific generated assets that aren't usually content
+    if (url.includes('avatars.githubusercontent.com')) return;
+    if (url.includes('github.com/sponsors')) return;
+
+    // Resolve relative URL
     if (!url.startsWith('http')) {
-        // Resolve relative URL
-        // Clean leading ./ or /
         let cleanPath = url.replace(/^(\.\/|\/)/, '');
         url = `${rawBase}/${cleanPath}`;
     } else {
         // Fix github blob URLs to raw
         url = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
     }
-    images.push(url);
+
+    // 2. Calculate Score to prioritize "Feature" images
+    let score = SCORE.STANDARD;
+    const lowerUrl = url.toLowerCase();
+    const lowerAlt = altText.toLowerCase();
+
+    // Priority Keywords (Feature/Demo/Screenshots)
+    const highPriority = ['demo', 'screenshot', 'preview', 'example', 'usage', 'gui', 'ui', 'interface', 'screen', 'showcase'];
+    if (highPriority.some(k => lowerUrl.includes(k) || lowerAlt.includes(k))) score += SCORE.FEATURE_KEYWORD;
+
+    // Medium Priority (Diagrams/Architecture)
+    const mediumPriority = ['diagram', 'architecture', 'flow', 'structure', 'overview'];
+    if (mediumPriority.some(k => lowerUrl.includes(k) || lowerAlt.includes(k))) score += SCORE.DIAGRAM_KEYWORD;
+
+    // Animation usually implies a demo
+    if (lowerUrl.endsWith('.gif') || lowerUrl.endsWith('.mp4') || lowerUrl.endsWith('.webm')) score += SCORE.ANIMATION;
+
+    candidates.push({ url, score });
+  };
+
+  // 1. Markdown images: ![alt](url)
+  const mdRegex = /!\[(.*?)\]\((.*?)\)/g;
+  let match;
+  while ((match = mdRegex.exec(markdown)) !== null) {
+    processUrl(match[2], match[1]);
   }
 
-  // 2. HTML images: <img src="url">
+  // 2. HTML images: <img src="url" alt="alt">
+  // Simple regex to capture src. Capturing alt attribute is complex with regex but we try a simple match.
   const htmlRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
   while ((match = htmlRegex.exec(markdown)) !== null) {
-    let url = match[1].trim();
-    if (!url) continue;
-    if (url.match(/(shield\.io|badge|travis|ci|codecov|circleci|icon|logo|avatar|npm)/i)) continue;
-
-    if (!url.startsWith('http')) {
-        let cleanPath = url.replace(/^(\.\/|\/)/, '');
-        url = `${rawBase}/${cleanPath}`;
-    } else {
-        url = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
-    }
-    images.push(url);
+    // Try to find alt tag within the tag string, but logic is complex, just pass empty alt for now for HTML or infer from filename
+    processUrl(match[1], ""); 
   }
 
-  // Deduplicate and limit to 3 high quality candidates
-  return Array.from(new Set(images)).slice(0, 3);
+  // Sort by Score DESC, then deduplicate
+  const sorted = candidates.sort((a, b) => b.score - a.score);
+  return Array.from(new Set(sorted.map(c => c.url))).slice(0, 5); // Return top 5 distinct images
 };
 
 const App = () => {
@@ -269,10 +341,12 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("");
   const [article, setArticle] = useState("");
+  const [articleTitle, setArticleTitle] = useState("");
   const [headerImage, setHeaderImage] = useState<string | null>(null);
   const [projectImages, setProjectImages] = useState<string[]>([]);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState("");
+  const [humanizing, setHumanizing] = useState(false);
   
   const [currentTheme, setCurrentTheme] = useState<Theme>(THEMES[0]);
   const [customPrimaryColor, setCustomPrimaryColor] = useState<string>(THEMES[0].headingDecoration);
@@ -280,6 +354,10 @@ const App = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  
+  const [showPoster, setShowPoster] = useState(false);
+  const [posterUrl, setPosterUrl] = useState<string | null>(null);
+  const [posterLoading, setPosterLoading] = useState(false);
   
   const [wechatConfig, setWechatConfig] = useState({ appId: '', appSecret: '' });
   const [publishing, setPublishing] = useState(false);
@@ -294,6 +372,8 @@ const App = () => {
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Store the stats of the main project for poster generation
+  const [mainProjectStats, setMainProjectStats] = useState<ProjectStats | null>(null);
 
   const t = i18n[lang];
 
@@ -409,12 +489,14 @@ const App = () => {
     setTargetCount(entry.urls.length);
     setUrls(entry.urls);
     setArticle(entry.content);
+    setArticleTitle(entry.title);
     setHeaderImage(entry.headerImage);
     setProjectImages(entry.projectImages || []);
     setShowHistory(false);
     setError("");
     setIsEditing(false);
     setPublishStatus(null);
+    setMainProjectStats(null); 
   };
 
   const deleteFromHistory = (e: React.MouseEvent, urlsKey: string) => {
@@ -689,10 +771,12 @@ const App = () => {
     setLoading(true);
     setLoadingText(t.loadingAnalyzing);
     setArticle("");
+    setArticleTitle("");
     setHeaderImage(null);
     setProjectImages([]);
     setPublishStatus(null);
     setIsEditing(false);
+    setMainProjectStats(null);
 
     try {
       const allStats: ProjectStats[] = [];
@@ -701,6 +785,7 @@ const App = () => {
         const stats = await fetchProjectData(url);
         allStats.push(stats);
       }
+      if(allStats.length > 0) setMainProjectStats(allStats[0]);
 
       const repoNamesStr = allStats.map(s => s.repoPath).join('、');
       
@@ -713,7 +798,7 @@ const App = () => {
       ${allStats.map((s, i) => {
           let info = `${i+1}. ${s.repoPath} (https://github.com/${s.repoPath}): ${s.description}`;
           if (s.images && s.images.length > 0) {
-              info += `\n   参考图片 (必须在文中合适位置插入至少一张): \n   ${s.images.join('\n   ')}`;
+              info += `\n   参考图片 (优先展示功能演示截图或架构图): \n   ${s.images.join('\n   ')}`;
           }
           return info;
       }).join('\n')}
@@ -739,7 +824,7 @@ const App = () => {
              - 😎 **它能干什么**: (大白话解释核心价值)
              - ✨ **高光时刻**: (3-4个亮点，用口语化列表)
              - 🌰 **举个栗子 / 上手试试**: (必须有一段最简单的代码示例 Code Block，让读者觉得容易上手)
-             - 🖼 **图片**: 如果上面提供了参考图片 URL，请务必用 Markdown 图片语法插入。
+             - 🖼 **图片**: 如果上面提供了参考图片 URL，请务必用 Markdown 图片语法插入。请优先选择展示功能的截图 (Screen) 或架构图，而不是 Logo。
       3.  **结尾**:
           - 简短总结，鼓励大家去 GitHub 点 Star。
       4.  **语言**: 使用 ${lang === 'zh' ? '中文 (Simplified Chinese)' : 'English'}，用词要现代、Geek 一点。
@@ -748,11 +833,14 @@ const App = () => {
       `;
 
       const resultText = await executeTextTask(prompt);
-      setArticle(resultText || "No content generated.");
       
-      setImageLoading(true);
       const titleMatch = resultText.match(/^#\s+(.+)$/m);
       const title = titleMatch ? titleMatch[1].trim() : (lang === 'zh' ? `精选开源项目: ${repoNamesStr}` : `Featured Projects: ${repoNamesStr}`);
+      setArticleTitle(title);
+
+      setArticle(resultText);
+      
+      setImageLoading(true);
       
       setLoadingText(t.loadingDesigning);
       // Enhanced Header Prompt: More specific about 3D style and color palette.
@@ -805,18 +893,196 @@ const App = () => {
     }
   };
 
+  const handleHumanize = async () => {
+    if (!article) return;
+    setHumanizing(true);
+    setPublishStatus(null);
+    try {
+        const prompt = `
+        **Role**: Text Humanizer Engine (inspired by Humanizer-zh).
+        **Goal**: Rewrite the provided technical article to make it indistinguishable from human writing, specifically for a "WeChat Official Account" (公众号) audience.
+
+        **Core Instructions (Humanizer-zh Philosophy)**:
+        1. **Increase Burstiness**: Variation in sentence structure and length. Mix short, punchy sentences with longer, flowing ones.
+        2. **Increase Perplexity**: Use more creative word choices. Avoid "common AI token patterns" (e.g., avoid "Unlock potential", "In the fast-paced world").
+        3. **Tone**: Casual, "Old Driver" (expert but humble), enthusiastic. Like a developer talking to a colleague at a bar.
+        4. **Anti-Translationese**: Ensure the Chinese flows naturally as native speech, not translated English. Use particles (呢, 吧, 呀) appropriately but not excessively.
+        5. **Strict Constraint**: YOU MUST PRESERVE ALL Markdown formatting exactly. 
+           - **CRITICAL**: Do NOT remove or modify any \`[PROJECT_CARD_x]\` placeholders.
+           - **CRITICAL**: Do NOT remove or modify any \`<img>\` tags.
+           - **CRITICAL**: Do NOT remove code blocks.
+
+        **Input Text**:
+        ${article}
+        `;
+
+        const humanizedText = await executeTextTask(prompt, false);
+        setArticle(humanizedText);
+        setPublishStatus({ type: 'success', msg: t.humanizeSuccess });
+        
+        // Update current history entry if exists
+        if (history.length > 0) {
+            const currentHistory = [...history];
+            // Assuming the first one is the active one since we just generated/loaded it
+            if (currentHistory[0]) {
+                currentHistory[0].content = humanizedText;
+                setHistory(currentHistory);
+                localStorage.setItem('git2wechat_history_multi', JSON.stringify(currentHistory));
+            }
+        }
+
+    } catch (e: any) {
+        setError("Humanize failed: " + e.message);
+    } finally {
+        setHumanizing(false);
+    }
+  };
+
+  const drawPoster = async () => {
+     if(!headerImage || !articleTitle) return;
+     setPosterLoading(true);
+     setPosterUrl(null);
+     
+     const canvas = document.createElement('canvas');
+     const ctx = canvas.getContext('2d');
+     // Vertical Poster Ratio 3:5 roughly, e.g. 750x1250
+     const W = 750;
+     const H = 1250;
+     canvas.width = W;
+     canvas.height = H;
+     
+     // 1. Background
+     ctx.fillStyle = currentTheme.bg === '#ffffff' ? '#f0f9ff' : '#020617';
+     ctx.fillRect(0,0,W,H);
+     
+     // 2. Load Images
+     const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+         const img = new Image();
+         img.crossOrigin = 'anonymous';
+         img.onload = () => resolve(img);
+         img.onerror = () => reject();
+         img.src = src;
+     });
+
+     try {
+         const coverImg = await loadImage(headerImage);
+         // Draw Header Image (Top half)
+         const coverH = W; // Square or close to square
+         ctx.drawImage(coverImg, 0, 0, W, coverH);
+         
+         // Gradient Overlay for text readability if needed, or just below
+         const gradient = ctx.createLinearGradient(0, coverH - 100, 0, coverH);
+         gradient.addColorStop(0, 'rgba(0,0,0,0)');
+         gradient.addColorStop(1, currentTheme.bg === '#ffffff' ? '#ffffff' : '#020617');
+         ctx.fillStyle = gradient;
+         ctx.fillRect(0, coverH-100, W, 100);
+
+         // 3. Title Area
+         ctx.fillStyle = currentTheme.id === 'wechat-light' ? '#ffffff' : '#020617';
+         ctx.fillRect(0, coverH, W, H - coverH);
+
+         // Title Text
+         ctx.fillStyle = currentTheme.id === 'wechat-light' ? '#1f2937' : '#e2e8f0';
+         ctx.font = 'bold 48px "Inter", sans-serif';
+         ctx.textAlign = 'left';
+         
+         const wrapText = (text: string, x: number, y: number, maxWidth: number, lineHeight: number) => {
+             const words = text.split(''); // Char split for Chinese
+             let line = '';
+             let testLine = '';
+             let lineCount = 0;
+             for(let n = 0; n < words.length; n++) {
+                 testLine = line + words[n];
+                 const metrics = ctx.measureText(testLine);
+                 const testWidth = metrics.width;
+                 if (testWidth > maxWidth && n > 0) {
+                     ctx.fillText(line, x, y);
+                     line = words[n];
+                     y += lineHeight;
+                     lineCount++;
+                 } else {
+                     line = testLine;
+                 }
+             }
+             ctx.fillText(line, x, y);
+             return y + lineHeight;
+         };
+         
+         let cursorY = coverH + 80;
+         cursorY = wrapText(articleTitle, 50, cursorY, W - 100, 65);
+
+         // 4. Stats Row
+         if (mainProjectStats) {
+             cursorY += 40;
+             const drawStat = (label: string, val: string, x: number) => {
+                 ctx.fillStyle = '#6366f1'; // Indigo
+                 ctx.font = 'bold 36px sans-serif';
+                 ctx.fillText(val, x, cursorY);
+                 ctx.fillStyle = '#94a3b8';
+                 ctx.font = '24px sans-serif';
+                 ctx.fillText(label, x, cursorY + 35);
+             };
+             
+             drawStat('Stars', mainProjectStats.stars, 50);
+             drawStat('Forks', mainProjectStats.forks, 250);
+             drawStat('Contributors', mainProjectStats.contributors, 450);
+         }
+
+         // 5. QR Code
+         // We generate a QR code for the first URL
+         const qrSize = 250;
+         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=${encodeURIComponent(urls[0] || 'https://github.com')}`;
+         const qrImg = await loadImage(qrUrl);
+         
+         const qrY = H - qrSize - 80;
+         const qrX = (W - qrSize) / 2;
+         
+         // Draw QR Code bg
+         ctx.fillStyle = '#ffffff';
+         ctx.fillRect(qrX - 10, qrY - 10, qrSize + 20, qrSize + 20);
+         ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+         
+         // Footer Text
+         ctx.fillStyle = '#94a3b8';
+         ctx.font = '24px sans-serif';
+         ctx.textAlign = 'center';
+         ctx.fillText('Generated by Git2WeChat Pro', W/2, H - 30);
+
+         setPosterUrl(canvas.toDataURL('image/png'));
+         
+     } catch (e) {
+         console.error(e);
+         setError("Failed to generate poster. CORS issue likely with images.");
+     } finally {
+         setPosterLoading(false);
+     }
+  };
+
   const handleMagicDiscover = async (isAI: boolean) => {
     if (loading) return;
     setLoading(true);
     setLoadingText(t.loadingTrending);
     setError("");
     try {
-      const query = isAI 
-        ? `Provide a JSON array of 5 currently trending AI-related GitHub repository URLs.`
-        : `Provide a JSON array of 5 currently trending GitHub repository URLs.`;
+      let fetchedUrls: string[] = [];
       
-      const response = await executeTextTask(query, true);
-      const fetchedUrls: string[] = JSON.parse(response || '[]');
+      if (isAI) {
+        // AI Pick: Use LLM
+        const query = `Provide a JSON array of 5 currently trending AI-related GitHub repository URLs.`;
+        const response = await executeTextTask(query, true);
+        fetchedUrls = JSON.parse(response || '[]');
+      } else {
+        // General Trending: Use Real Scraper
+        fetchedUrls = await fetchGithubTrending();
+        
+        // Fallback to AI if scraping yields nothing
+        if (fetchedUrls.length === 0) {
+           const query = `Provide a JSON array of 5 currently trending GitHub repository URLs.`;
+           const response = await executeTextTask(query, true);
+           fetchedUrls = JSON.parse(response || '[]');
+        }
+      }
+
       const historyUrls = getHistoryUrls();
       const unseenUrls = fetchedUrls.filter(u => !historyUrls.has(u.toLowerCase().trim())).slice(0, targetCount);
       
@@ -970,6 +1236,10 @@ const App = () => {
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                   {t.copyWeChat}
                 </button>
+                <button onClick={() => { setShowPoster(true); drawPoster(); }} className="bg-pink-600 hover:bg-pink-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                  {t.genPoster}
+                </button>
                 <button onClick={copyMarkdown} className="bg-slate-700 hover:bg-slate-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                   {t.copyMarkdown}
@@ -980,6 +1250,10 @@ const App = () => {
                 </button>
               </div>
               <div className="flex gap-2">
+                <button onClick={handleHumanize} disabled={humanizing} className={`text-purple-400 border border-purple-400/30 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-purple-400/10 transition-all flex items-center gap-2 ${humanizing ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                    {humanizing ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>}
+                    {humanizing ? t.humanizing : t.humanize}
+                </button>
                 <button onClick={() => setIsEditing(!isEditing)} className="text-indigo-400 border border-indigo-400/30 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-indigo-400/10 transition-all">{isEditing ? t.preview : t.edit}</button>
               </div>
             </div>
@@ -1011,6 +1285,35 @@ const App = () => {
               )}
             </div>
           </div>
+        )}
+
+        {/* Poster Modal */}
+        {showPoster && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4" onClick={() => setShowPoster(false)}>
+             <div className="flex flex-col items-center gap-4 max-h-screen">
+                <div className="bg-slate-900 border border-white/10 rounded-2xl p-2 shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+                    {posterLoading ? (
+                        <div className="w-[375px] h-[600px] flex flex-col items-center justify-center text-slate-400 gap-4">
+                            <svg className="animate-spin h-8 w-8 text-indigo-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <span className="text-xs uppercase tracking-widest">{t.loadingPoster}</span>
+                        </div>
+                    ) : posterUrl ? (
+                        <img src={posterUrl} className="w-auto h-[70vh] rounded-lg" alt="Share Poster" />
+                    ) : (
+                         <div className="w-[375px] h-[600px] flex items-center justify-center text-red-400">Failed to load poster</div>
+                    )}
+                </div>
+                {posterUrl && (
+                  <div className="flex gap-4">
+                    <a href={posterUrl} download="share-poster.png" className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-full font-bold shadow-xl transition-transform active:scale-95 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        {t.downloadPoster}
+                    </a>
+                    <button onClick={() => setShowPoster(false)} className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-3 rounded-full font-bold shadow-xl transition-colors">&times;</button>
+                  </div>
+                )}
+             </div>
+           </div>
         )}
 
         {/* Modals */}
