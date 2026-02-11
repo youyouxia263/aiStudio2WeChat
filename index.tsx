@@ -10,13 +10,25 @@ declare const hljs: any;
 
 type LLMProvider = 'gemini' | 'alibaba' | 'volcengine' | 'custom';
 type Language = 'zh' | 'en';
-// Removed StructureMode type as we are enforcing a single format
+type Platform = 'wechat' | 'zhihu' | 'csdn' | 'toutiao';
+type LoginMethod = 'qrcode' | 'cookie' | 'password';
 
 interface LLMConfig {
   provider: LLMProvider;
   baseUrl: string;
   model: string;
   imageModel: string;
+}
+
+interface PlatformConfig {
+  id: Platform;
+  name: string;
+  icon: React.ReactNode;
+  credentials: Record<string, string>;
+  isConnected: boolean;
+  loginMethod?: LoginMethod;
+  avatar?: string;
+  username?: string;
 }
 
 type Theme = {
@@ -61,6 +73,20 @@ interface TOCItem {
   level: number;
 }
 
+interface PublishLog {
+  platform: string;
+  status: 'pending' | 'processing' | 'success' | 'error';
+  msg: string;
+}
+
+// --- Icons ---
+const Icons = {
+  WeChat: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M8.5,13.5A1.5,1.5 0 1,1 7,15A1.5,1.5 0 0,1 8.5,13.5M16.5,13.5A1.5,1.5 0 1,1 15,15A1.5,1.5 0 0,1 16.5,13.5M12,2C6.48,2 2,5.58 2,10C2,12.5 3.39,14.74 5.57,16.22C5.38,16.92 5,18.5 4.5,19.5C4.47,19.56 5.33,19.23 6.69,18.3C7.03,18.06 7.4,17.9 7.79,17.91C9.07,18.5 10.47,18.8 12,18.8C17.52,18.8 22,15.21 22,10.8C22,6.38 17.52,2 12,2Z" /></svg>,
+  Zhihu: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M13.5 5.9c.7 0 1.4.1 2 .2-1.3 2-2.8 3.9-4.5 5.5l1.6 1.4c2.2-2.2 4.1-4.7 5.7-7.3 1.1.5 2 1.3 2.7 2.3-.9 1.4-1.9 2.7-3.1 3.9l.6.6c1.6-1.5 3-3.2 4.1-5 1.1 1.7 1.8 3.6 2 5.6h-2.5c-.2-1.2-.6-2.4-1.2-3.4H13.5V5.9zm-4.1 6.8c-.8 1.4-1.8 2.6-3 3.6l1.2 1.4c1.5-1.3 2.8-2.8 3.7-4.5l-1.9-.5zm-4.2-2c-.5-1-1.1-1.9-1.8-2.8l-1.5 1c.7 1 1.3 2 1.9 3.1l1.4-1.3zM4.9 3C3.5 4.6 2.3 6.4 1.4 8.3L3 9.2c.8-1.7 1.8-3.3 3.1-4.7L4.9 3z" /></svg>,
+  CSDN: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M3 3h18v18H3V3zm15 15V6H6v12h12zM8 8h8v2H8V8zm0 4h8v2H8v-2z" /></svg>,
+  Toutiao: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm2 2h8v2H8V8zm0 4h5v2H8v-2z" /></svg> // Simplified placeholder
+};
+
 // --- Translations ---
 
 const i18n = {
@@ -74,7 +100,7 @@ const i18n = {
     copyWeChat: "复制微信格式",
     copyMarkdown: "Markdown 源码",
     genPoster: "生成分享海报",
-    pushDraft: "推送至草稿箱",
+    pushDraft: "多平台发布",
     edit: "编辑文本",
     preview: "预览效果",
     history: "历史记录",
@@ -85,15 +111,15 @@ const i18n = {
     cards: "视觉卡片",
     loadingAnalyzing: "正在解析 README 文档...",
     loadingRetrieving: "正在获取项目信息: ",
-    loadingDesigning: "正在梳理文章结构...", 
+    loadingDesigning: "正在梳理文章章节与结构...", 
     loadingDrawing: "正在绘制卡片: ",
     loadingTrending: "正在抓取 GitHub Trending...",
     loadingPoster: "正在绘制海报...",
     copySuccess: "已复制微信排版格式！直接粘贴到公众号编辑器即可。",
     mdSuccess: "Markdown 源码已复制！",
-    pushSuccess: "文章已成功推送至微信草稿箱！",
-    pushError: "推送失败，请检查设置。 (模拟)",
-    pushWarning: "请先在设置中配置微信 API 密钥。",
+    pushSuccess: "发布流程已完成！",
+    pushError: "发布失败，请检查配置。",
+    pushWarning: "请先连接至少一个平台账号。",
     prevCovered: "曾经生成过",
     recentGens: "历史生成记录",
     noHistory: "暂无历史记录",
@@ -121,11 +147,38 @@ const i18n = {
     posterTitle: "朋友圈分享海报",
     posterDesc: "长按保存图片，分享到朋友圈或群聊",
     downloadPoster: "下载海报",
-    humanize: "拟人化润色 (Humanizer)",
+    humanize: "拟人化润色",
     humanizing: "正在进行拟人化重写...",
     humanizeSuccess: "文章已完成去 AI 化润色！",
     structureMode: "文章偏好",
-    toc: "文章目录"
+    toc: "文章目录",
+    publishCenter: "多平台发布中心",
+    connect: "连接账号",
+    connected: "已连接",
+    publishNow: "立即发布",
+    publishing: "正在发布...",
+    publishingTo: "正在发布至",
+    publishSuccess: "发布成功",
+    publishFailed: "发布失败",
+    configPlatform: "配置平台信息",
+    tokenLabel: "认证信息 (Cookie/Token)",
+    tokenPlaceholder: "粘贴浏览器控制台获取的 Cookie 或 Token",
+    loginTip: "提示: 这是一个纯前端应用。直接发布需要您手动提供各平台的登录凭证 (Cookie/Token)。推荐使用'复制格式'功能手动发布。",
+    platforms: {
+      wechat: "微信公众号",
+      zhihu: "知乎",
+      csdn: "CSDN",
+      toutiao: "今日头条"
+    },
+    loginMethods: {
+      qrcode: "扫码登录",
+      cookie: "Cookie/Token",
+      password: "账号密码"
+    },
+    scanQrTip: "请使用手机 App 扫码登录",
+    scanSuccess: "扫码成功，正在登录...",
+    loginSuccess: "登录成功",
+    manualInput: "手动输入凭证"
   },
   en: {
     title: "Git2WeChat Pro",
@@ -137,7 +190,7 @@ const i18n = {
     copyWeChat: "Copy WeChat Format",
     copyMarkdown: "Copy Markdown",
     genPoster: "Generate Poster",
-    pushDraft: "Push to Drafts",
+    pushDraft: "Multi-Platform Publish",
     edit: "Edit Text",
     preview: "Preview",
     history: "History",
@@ -148,15 +201,15 @@ const i18n = {
     cards: "Cards",
     loadingAnalyzing: "Analyzing README...",
     loadingRetrieving: "Retrieving data: ",
-    loadingDesigning: "Structuring article...",
+    loadingDesigning: "Structuring chapters...",
     loadingDrawing: "Drawing card: ",
     loadingTrending: "Scraping GitHub Trending...",
     loadingPoster: "Drawing poster...",
     copySuccess: "WeChat format copied! Paste it directly into the editor.",
     mdSuccess: "Markdown source copied!",
-    pushSuccess: "Article pushed to WeChat Drafts successfully!",
-    pushError: "Failed to push. Check credentials. (Simulation)",
-    pushWarning: "Please configure WeChat API in settings first.",
+    pushSuccess: "Publish workflow completed!",
+    pushError: "Publish failed. Check config.",
+    pushWarning: "Please connect at least one platform.",
     prevCovered: "PREVIOUSLY COVERED",
     recentGens: "Recent Generations",
     noHistory: "No history found.",
@@ -188,7 +241,34 @@ const i18n = {
     humanizing: "Humanizing text...",
     humanizeSuccess: "Text successfully humanized!",
     structureMode: "Article Preference",
-    toc: "Table of Contents"
+    toc: "Table of Contents",
+    publishCenter: "Multi-Platform Publishing",
+    connect: "Connect",
+    connected: "Connected",
+    publishNow: "Publish Now",
+    publishing: "Publishing...",
+    publishingTo: "Publishing to",
+    publishSuccess: "Published Successfully",
+    publishFailed: "Publish Failed",
+    configPlatform: "Configure Platform",
+    tokenLabel: "Auth (Cookie/Token)",
+    tokenPlaceholder: "Paste Cookie or Token from Browser DevTools",
+    loginTip: "Note: This is a client-side app. Direct publishing requires you to manually provide login credentials (Cookie/Token). 'Copy Format' is recommended.",
+    platforms: {
+      wechat: "WeChat",
+      zhihu: "Zhihu",
+      csdn: "CSDN",
+      toutiao: "Toutiao"
+    },
+    loginMethods: {
+      qrcode: "Scan QR",
+      cookie: "Cookie/Token",
+      password: "Password"
+    },
+    scanQrTip: "Please scan with mobile app",
+    scanSuccess: "Scanned successfully, logging in...",
+    loginSuccess: "Login Successful",
+    manualInput: "Manual Input"
   }
 };
 
@@ -242,8 +322,6 @@ const FONTS = [
   { id: 'serif', name: 'Serif', value: "'Noto Serif SC', serif" },
   { id: 'mono', name: 'Monospace', value: "'JetBrains Mono', monospace" },
 ];
-
-// Removed STRUCTURES array
 
 // --- Helper Functions ---
 
@@ -353,9 +431,23 @@ const App = () => {
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [posterLoading, setPosterLoading] = useState(false);
   
-  const [wechatConfig, setWechatConfig] = useState({ appId: '', appSecret: '' });
+  // Platform Publish State
+  const [showPublishModal, setShowPublishModal] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishStatus, setPublishStatus] = useState<{type: 'success' | 'error' | 'warning', msg: string} | null>(null);
+  const [publishLogs, setPublishLogs] = useState<PublishLog[]>([]);
+  
+  // Platform Login Logic
+  const [loginModalPlatform, setLoginModalPlatform] = useState<Platform | null>(null);
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('qrcode');
+  const [qrCodeState, setQrCodeState] = useState<'loading' | 'active' | 'scanned' | 'success'>('loading');
+  
+  const [platforms, setPlatforms] = useState<PlatformConfig[]>([
+    { id: 'wechat', name: 'WeChat', icon: Icons.WeChat, credentials: {}, isConnected: false },
+    { id: 'zhihu', name: 'Zhihu', icon: Icons.Zhihu, credentials: {}, isConnected: false },
+    { id: 'csdn', name: 'CSDN', icon: Icons.CSDN, credentials: {}, isConnected: false },
+    { id: 'toutiao', name: 'Toutiao', icon: Icons.Toutiao, credentials: {}, isConnected: false }
+  ]);
 
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({
     provider: 'gemini',
@@ -394,8 +486,16 @@ const App = () => {
       if (font) setCurrentFont(font);
     }
 
-    const savedWechat = localStorage.getItem('wechatConfig');
-    if (savedWechat) setWechatConfig(JSON.parse(savedWechat));
+    const savedPlatforms = localStorage.getItem('git2wechat_platforms');
+    if (savedPlatforms) {
+        try {
+            const parsed = JSON.parse(savedPlatforms);
+            setPlatforms(prev => prev.map(p => {
+                const saved = parsed.find((sp: any) => sp.id === p.id);
+                return saved ? { ...p, ...saved, icon: p.icon } : p;
+            }));
+        } catch(e) {}
+    }
 
     const savedLlm = localStorage.getItem('llmConfig_v2');
     if (savedLlm) setLlmConfig(JSON.parse(savedLlm));
@@ -433,6 +533,12 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('git2wechat_font', currentFont.id);
   }, [currentFont.id]);
+
+  const savePlatforms = (newPlatforms: PlatformConfig[]) => {
+      setPlatforms(newPlatforms);
+      const toSave = newPlatforms.map(({id, credentials, isConnected, avatar, username}) => ({id, credentials, isConnected, avatar, username}));
+      localStorage.setItem('git2wechat_platforms', JSON.stringify(toSave));
+  };
 
   useEffect(() => {
     if (!isEditing && article && contentRef.current) {
@@ -847,38 +953,41 @@ const App = () => {
 
       const repoNamesStr = allStats.map(s => s.repoPath.split('/')[1]).join('、');
 
-      // Modified Core Guidelines for Technical Structure based on README
+      // Enhanced Guidelines for strict chapter levels
       const coreGuidelines = lang === 'zh' ? `
       **核心写作原则 (基于 README)**:
       1. **事实优先**: 
          - 你必须**严格基于提供的 README 内容**进行写作。
-         - 如果 README 中有明确的功能列表、安装步骤或示例代码，直接引用并整理，**不要编造**多余的废话。
-         - 语气要像一个专业开发者向同事推荐工具，客观、准确、干练。
-      2. **结构化分层**:
-         - 文章必须包含清晰的章节层次 (H2, H3)。
-         - 强制包含：简介、核心功能、安装与使用、总结。
+         - 如果 README 中有明确的功能列表、安装步骤或示例代码，直接引用并整理。
+      2. **严格的章节层次**:
+         - 文章必须严格遵循以下 Markdown 二级标题结构 (H2):
+           - ## 项目简介
+           - ## 核心功能
+           - ## 快速开始 (或 安装使用)
+           - ## 应用场景 (可选)
+           - ## 总结
+         - 在"项目简介"后，必须插入 \`[PROJECT_CARD_index]\` 占位符。
       3. **排版规范**: 
-         - 代码块必须指明语言 (如 \`\`\`python)。
+         - 代码块必须指明语言 (如 \`\`\`bash, \`\`\`python)。
          - 关键信息使用列表 (Bullet points)。
       4. **视觉插图**:
-         - 必须在"项目介绍"后的位置插入 \`[PROJECT_CARD_index]\` 占位符。
          - 如果 README 提供了图片 URL (见 Images 列表)，请在"核心功能"或"演示"部分挑选 1-2 张插入。
-      5. **标题策略**: 
-         - 标题要朴实但切中痛点，例如 "GitHub 高星项目：[项目名] - [一句话解决什么问题]"。
       ` : `
       **Core Writing Rules (Based on README)**:
       1. **Fact-First**: 
-         - You must write **strictly based on the provided README content**.
-         - If the README has clear features, installation steps, or code examples, summarize and use them. **Do not invent** superfluous marketing fluff.
-         - Tone: Professional developer recommending a tool to a colleague. Concise and accurate.
-      2. **Structured Hierarchy**:
-         - Article must use clear header hierarchy (H2, H3).
-         - Mandatory sections: Introduction, Core Features, Installation/Usage, Summary.
+         - Write **strictly based on the provided README content**.
+      2. **Strict Chapter Levels**:
+         - Article must strictly follow this H2 hierarchy:
+           - ## Introduction
+           - ## Key Features
+           - ## Installation & Usage
+           - ## Use Cases (Optional)
+           - ## Conclusion
+         - Insert \`[PROJECT_CARD_index]\` placeholder after the Introduction.
       3. **Formatting**: 
          - Code blocks must specify language.
-         - Use bullet points for key info.
+         - Use bullet points.
       4. **Visuals**:
-         - Insert \`[PROJECT_CARD_index]\` placeholder after the intro.
          - If Images are provided, use 1-2 real URLs in relevant sections.
       `;
 
@@ -906,26 +1015,21 @@ const App = () => {
           
           # (Generate a clear, benefit-oriented Title)
           
-          > (One sentence summary of what this project is)
+          > (One sentence summary)
           
-          ## 项目介绍 (Introduction)
-          (Briefly explain what problem this project solves based on the README. Keep it simple.)
+          ## 项目简介 (Introduction)
+          (Briefly explain what problem this project solves based on the README.)
           
           [Insert visual card placeholder here: [PROJECT_CARD_0]]
           
           ## 核心功能 (Key Features)
-          (List the features found in the README using bullet points. Use H3 for major feature groups if necessary.)
+          (List the features found in the README using bullet points.)
           
-          ## 如何使用 (How to Use/Installation)
-          (Provide the installation command and a simple "Hello World" code example from the README. Wrap in code blocks.)
+          ## 快速开始 (Quick Start)
+          (Provide the installation command and a simple usage code example from the README. Wrap in code blocks.)
           
           ## 总结 (Conclusion)
-          (Brief verdict, link to repo: https://github.com/${s.repoPath}, and mention the Star count: ${s.stars})
-          
-          **IMPORTANT**: 
-          - Do not add "In conclusion" transition words.
-          - If the README is short, keep the article short. Do not bloat it.
-          - Output ONLY Markdown.
+          (Brief verdict, link to repo: https://github.com/${s.repoPath})
           
           **Language**: ${lang === 'zh' ? 'Chinese (Simplified)' : 'English'}.
           `;
@@ -1034,11 +1138,10 @@ const App = () => {
         **任务**: 润色这篇文章，使其更自然、流畅，但保持技术准确性。
         
         **严格指令**:
-        1. **结构保持**: 绝对保留 Markdown 结构，包括标题、代码块和 [PROJECT_CARD_x] 占位符。
+        1. **结构保持**: 绝对保留 Markdown 结构，包括标题 (H2, H3)、代码块和 [PROJECT_CARD_x] 占位符。
         2. **语言风格**: 
-           - 去除机器翻译感（如“它提供了”改为“你可以使用”）。
-           - 保持专业、客观。不要添加过于浮夸的形容词。
-           - 修正可能存在的 Markdown 格式错误。
+           - 去除机器翻译感。
+           - 保持专业、客观。
         
         **输入文章**:
         ${article}
@@ -1047,9 +1150,8 @@ const App = () => {
         **Task**: Polish this article to sound natural but professionally accurate.
         
         **Instructions**:
-        1. KEEP Markdown structure, headers, code, and placeholders [PROJECT_CARD_x].
+        1. KEEP Markdown structure, headers (H2, H3), code, and placeholders [PROJECT_CARD_x].
         2. Fix robotic phrasing.
-        3. Maintain a professional tone. Do not over-hype.
         
         **Input**:
         ${article}
@@ -1269,22 +1371,95 @@ const App = () => {
     }
   };
 
-  const publishToWeChatDraft = async () => {
-    if (!wechatConfig.appId || !wechatConfig.appSecret) {
-      setPublishStatus({ type: 'warning', msg: t.pushWarning });
-      setShowSettings(true);
-      return;
-    }
-    setPublishing(true);
-    setPublishStatus(null);
-    try {
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      setPublishStatus({ type: 'success', msg: t.pushSuccess });
-    } catch (e) {
-      setPublishStatus({ type: 'error', msg: t.pushError });
-    } finally {
+  const handleMultiPlatformPublish = async () => {
+      const connected = platforms.filter(p => p.isConnected);
+      if (connected.length === 0) {
+          setPublishStatus({type: 'warning', msg: t.pushWarning});
+          return;
+      }
+      
+      setPublishing(true);
+      setPublishStatus(null);
+      
+      // Initialize logs
+      setPublishLogs(connected.map(p => ({
+          platform: p.name,
+          status: 'pending',
+          msg: t.publishing
+      })));
+
+      for (let i = 0; i < connected.length; i++) {
+          const p = connected[i];
+          
+          // Update current to processing
+          setPublishLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'processing', msg: `${t.publishingTo} ${p.name}...` } : log));
+
+          // Simulate API network delay
+          await new Promise(r => setTimeout(r, 1500));
+          
+          // Check credentials (mock validation)
+          const success = !!p.credentials.token && p.credentials.token.length > 5;
+
+          // Update result
+          setPublishLogs(prev => prev.map((log, idx) => idx === i ? { 
+              ...log, 
+              status: success ? 'success' : 'error', 
+              msg: success ? t.publishSuccess : t.publishFailed 
+          } : log));
+      }
+
       setPublishing(false);
-    }
+      setPublishStatus({type: 'success', msg: t.pushSuccess});
+  };
+
+  const openLoginModal = (p: PlatformConfig) => {
+    setLoginModalPlatform(p.id);
+    setLoginMethod('qrcode'); // Default to QR
+    setQrCodeState('loading');
+    setTimeout(() => {
+       if (loginModalPlatform === p.id) setQrCodeState('active');
+    }, 1000);
+  };
+
+  const simulateQrScan = () => {
+     if (qrCodeState !== 'active') return;
+     setQrCodeState('scanned');
+     setTimeout(() => {
+        setQrCodeState('success');
+        saveLogin(loginModalPlatform!, 'MOCK_TOKEN_VIA_QR');
+     }, 2000);
+  };
+
+  const saveLogin = (platformId: Platform, token: string) => {
+      const newPlatforms = platforms.map(pl => 
+         pl.id === platformId ? { 
+             ...pl, 
+             isConnected: true, 
+             credentials: { token },
+             loginMethod: loginMethod
+         } : pl
+      );
+      savePlatforms(newPlatforms);
+      setLoginModalPlatform(null);
+  };
+
+  const togglePlatformConnect = (p: PlatformConfig) => {
+      if (p.isConnected) {
+         // Disconnect
+         const newPlatforms = platforms.map(pl => pl.id === p.id ? { ...pl, isConnected: false, credentials: {} } : pl);
+         savePlatforms(newPlatforms);
+      } else {
+         openLoginModal(p);
+      }
+  };
+
+  const saveCredentials = (creds: string) => {
+      if (!loginModalPlatform) return;
+      const newPlatforms = platforms.map(pl => 
+         pl.id === loginModalPlatform ? { ...pl, isConnected: true, credentials: { token: creds } } : pl
+      );
+      savePlatforms(newPlatforms);
+      setLoginModalPlatform(null);
   };
 
   const changeProvider = (p: LLMProvider) => {
@@ -1385,8 +1560,8 @@ const App = () => {
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                     {t.copyMarkdown}
                   </button>
-                  <button onClick={publishToWeChatDraft} disabled={publishing} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50">
-                    {publishing ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13"></path><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>}
+                  <button onClick={() => setShowPublishModal(true)} disabled={publishing} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13"></path><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                     {t.pushDraft}
                   </button>
                 </div>
@@ -1409,11 +1584,6 @@ const App = () => {
                   {publishStatus.msg}
                 </div>
               )}
-
-              <div className="flex items-center gap-4 text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-2 ml-1">
-                <span>{article.split(/\s+/).length} {t.words}</span>
-                <span>{projectImages.length} {t.cards}</span>
-              </div>
 
               <div className="rounded-3xl overflow-hidden shadow-2xl transition-all border border-white/5" style={{ backgroundColor: currentTheme.bg }}>
                 {headerImage && (
@@ -1450,6 +1620,171 @@ const App = () => {
                   </div>
                </div>
             )}
+          </div>
+        )}
+
+        {/* Multi-Platform Publish Modal */}
+        {showPublishModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4" onClick={() => !loginModalPlatform && setShowPublishModal(false)}>
+            <div className="bg-slate-900 border border-white/10 rounded-3xl w-full max-w-2xl p-8 flex flex-col shadow-2xl overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6 border-b border-white/5 pb-4">
+                  <h3 className="font-bold text-xl flex items-center gap-2">
+                     <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                     {t.publishCenter}
+                  </h3>
+                  <button onClick={() => setShowPublishModal(false)} className="text-slate-500 hover:text-white transition-colors text-2xl">&times;</button>
+                </div>
+
+                {!loginModalPlatform && !publishing && !publishStatus && (
+                   <div className="bg-blue-500/10 border border-blue-500/20 text-blue-200 p-4 rounded-xl mb-6 text-xs leading-relaxed">
+                      {t.loginTip}
+                   </div>
+                )}
+                
+                {/* Publishing Logs Display */}
+                {publishLogs.length > 0 && !loginModalPlatform && (
+                   <div className="mb-8 space-y-2 bg-slate-950 p-4 rounded-xl border border-white/5 max-h-[200px] overflow-y-auto">
+                      {publishLogs.map((log, i) => (
+                         <div key={i} className="flex items-center gap-3 text-sm">
+                            <span className="w-4 h-4 flex items-center justify-center">
+                               {log.status === 'processing' && <svg className="animate-spin h-3 w-3 text-indigo-400" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
+                               {log.status === 'success' && <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>}
+                               {log.status === 'error' && <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>}
+                               {log.status === 'pending' && <div className="w-2 h-2 rounded-full bg-slate-600"></div>}
+                            </span>
+                            <span className={`${log.status === 'success' ? 'text-emerald-300' : log.status === 'error' ? 'text-red-300' : 'text-slate-300'}`}>{log.msg}</span>
+                         </div>
+                      ))}
+                   </div>
+                )}
+
+                {/* Main List of Platforms */}
+                {!loginModalPlatform && (
+                    <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 ${publishing ? 'opacity-50 pointer-events-none' : ''}`}>
+                      {platforms.map(p => (
+                        <div key={p.id} className={`p-4 rounded-xl border flex items-center justify-between transition-all ${p.isConnected ? 'bg-indigo-900/20 border-indigo-500/30' : 'bg-slate-800/50 border-white/5 hover:border-white/10'}`}>
+                          <div className="flex items-center gap-3">
+                            <div className={`p-2 rounded-lg ${p.isConnected ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
+                              {p.icon}
+                            </div>
+                            <div>
+                              <div className="font-bold text-sm text-white">{t.platforms[p.id]}</div>
+                              <div className={`text-[10px] font-bold uppercase tracking-wider ${p.isConnected ? 'text-indigo-400' : 'text-slate-500'}`}>
+                                {p.isConnected ? (p.loginMethod === 'qrcode' ? 'Via QRCode' : 'Via Cookie') : 'Not Connected'}
+                              </div>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => togglePlatformConnect(p)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${p.isConnected ? 'border-red-500/30 text-red-400 hover:bg-red-500/10' : 'border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10'}`}
+                          >
+                            {p.isConnected ? 'Disconnect' : t.connect}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                )}
+                
+                {/* Specific Login Modal Area */}
+                {loginModalPlatform && (
+                    <div className="bg-slate-800 p-6 rounded-2xl border border-white/10 mb-8 animate-in fade-in zoom-in-95 relative">
+                       <button onClick={() => setLoginModalPlatform(null)} className="absolute top-4 right-4 text-slate-500 hover:text-white">&times;</button>
+                       <h4 className="font-bold text-sm mb-6 flex items-center gap-2">
+                           {platforms.find(p=>p.id===loginModalPlatform)?.icon}
+                           {t.configPlatform}: {t.platforms[loginModalPlatform]}
+                       </h4>
+
+                       {/* Login Method Tabs */}
+                       <div className="flex border-b border-slate-700 mb-6">
+                           <button onClick={() => setLoginMethod('qrcode')} className={`px-4 py-2 text-xs font-bold border-b-2 transition-colors ${loginMethod === 'qrcode' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+                               {t.loginMethods.qrcode}
+                           </button>
+                           <button onClick={() => setLoginMethod('cookie')} className={`px-4 py-2 text-xs font-bold border-b-2 transition-colors ${loginMethod === 'cookie' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+                               {t.loginMethods.cookie}
+                           </button>
+                           {loginModalPlatform !== 'wechat' && (
+                               <button onClick={() => setLoginMethod('password')} className={`px-4 py-2 text-xs font-bold border-b-2 transition-colors ${loginMethod === 'password' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+                                   {t.loginMethods.password}
+                               </button>
+                           )}
+                       </div>
+
+                       {/* QR Code Scan Flow */}
+                       {loginMethod === 'qrcode' && (
+                           <div className="flex flex-col items-center py-4">
+                               <div className="w-48 h-48 bg-white p-2 rounded-xl mb-4 relative overflow-hidden group cursor-pointer" onClick={simulateQrScan}>
+                                   {qrCodeState === 'loading' ? (
+                                       <div className="w-full h-full flex items-center justify-center bg-slate-100 rounded-lg">
+                                           <svg className="animate-spin h-8 w-8 text-slate-400" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                       </div>
+                                   ) : (
+                                       <>
+                                         <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=LOGIN_MOCK_${loginModalPlatform}_${Date.now()}`} className={`w-full h-full object-contain transition-opacity ${qrCodeState === 'scanned' || qrCodeState === 'success' ? 'opacity-20' : 'opacity-100'}`} alt="Login QR" />
+                                         {(qrCodeState === 'scanned' || qrCodeState === 'success') && (
+                                             <div className="absolute inset-0 flex items-center justify-center">
+                                                 <div className="bg-emerald-500 rounded-full p-2 animate-in zoom-in">
+                                                     <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                 </div>
+                                             </div>
+                                         )}
+                                       </>
+                                   )}
+                                   {qrCodeState === 'active' && <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity">Click to Simulate Scan</div>}
+                               </div>
+                               <p className="text-sm text-slate-400 mb-2 font-bold">{
+                                   qrCodeState === 'loading' ? 'Loading QR...' : 
+                                   qrCodeState === 'active' ? t.scanQrTip : 
+                                   qrCodeState === 'scanned' ? t.scanSuccess : 
+                                   t.loginSuccess
+                               }</p>
+                           </div>
+                       )}
+
+                       {/* Cookie/Token Input Flow */}
+                       {loginMethod === 'cookie' && (
+                           <div className="space-y-3">
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t.tokenLabel}</label>
+                              <div className="flex gap-2">
+                                 <input 
+                                    type="password" 
+                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none transition-colors" 
+                                    placeholder={t.tokenPlaceholder}
+                                    onKeyDown={(e) => {
+                                       if(e.key === 'Enter') saveCredentials((e.target as HTMLInputElement).value);
+                                    }}
+                                 />
+                                 <button onClick={(e) => saveCredentials(((e.target as HTMLElement).previousSibling as HTMLInputElement).value)} className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-lg text-xs font-bold">{t.save}</button>
+                              </div>
+                           </div>
+                       )}
+                       
+                       {/* Password Flow (Mock) */}
+                        {loginMethod === 'password' && (
+                           <div className="space-y-3">
+                              <div>
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Username / Phone</label>
+                                  <input type="text" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                              </div>
+                              <div>
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Password</label>
+                                  <input type="password" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
+                              </div>
+                              <button onClick={() => saveLogin(loginModalPlatform!, 'MOCK_PWD_TOKEN')} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg text-xs font-bold mt-2">Login</button>
+                           </div>
+                       )}
+                    </div>
+                )}
+
+                {!loginModalPlatform && (
+                    <div className="mt-auto flex justify-end gap-3 pt-6 border-t border-white/5">
+                      <button onClick={() => setShowPublishModal(false)} className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-400 hover:bg-slate-800 transition-colors">{t.cancel}</button>
+                      <button onClick={handleMultiPlatformPublish} disabled={publishing} className="px-6 py-2.5 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg transition-all active:translate-y-0.5 flex items-center gap-2">
+                         {publishing && <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
+                         {publishing ? t.publishing : t.publishNow}
+                      </button>
+                    </div>
+                )}
+            </div>
           </div>
         )}
 
@@ -1517,29 +1852,11 @@ const App = () => {
                        </div>
                     )}
                   </div>
-
-                  <div className="space-y-4">
-                     <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-widest">{t.wechatApi}</h4>
-                     <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 space-y-3">
-                        <div className="flex gap-3">
-                           <div className="flex-1">
-                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.appId}</label>
-                              <input type="text" value={wechatConfig.appId} onChange={(e) => setWechatConfig({...wechatConfig, appId: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
-                           </div>
-                           <div className="flex-1">
-                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.appSecret}</label>
-                              <input type="password" value={wechatConfig.appSecret} onChange={(e) => setWechatConfig({...wechatConfig, appSecret: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
-                           </div>
-                        </div>
-                        <p className="text-[10px] text-emerald-400/80 bg-emerald-900/20 p-2 rounded-lg border border-emerald-500/20">{t.proTip}</p>
-                     </div>
-                  </div>
                </div>
 
                <div className="mt-8 pt-6 border-t border-white/5 flex justify-end gap-3">
                   <button onClick={() => setShowSettings(false)} className="px-5 py-2 rounded-xl text-sm font-bold text-slate-400 hover:bg-slate-800 transition-colors">{t.cancel}</button>
                   <button onClick={() => {
-                     localStorage.setItem('wechatConfig', JSON.stringify(wechatConfig));
                      localStorage.setItem('llmConfig_v2', JSON.stringify(llmConfig));
                      setShowSettings(false);
                   }} className="px-6 py-2 rounded-xl text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg transition-all active:translate-y-0.5">{t.save}</button>
