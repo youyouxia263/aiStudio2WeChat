@@ -10,7 +10,7 @@ declare const hljs: any;
 
 type LLMProvider = 'gemini' | 'alibaba' | 'volcengine' | 'custom';
 type Language = 'zh' | 'en';
-type StructureMode = 'story' | 'tutorial' | 'analysis';
+// Removed StructureMode type as we are enforcing a single format
 
 interface LLMConfig {
   provider: LLMProvider;
@@ -52,6 +52,7 @@ interface ProjectStats {
   issues: string;
   avatars?: string[];
   images?: string[]; // New: Images extracted from README
+  readmeContent?: string; // New: Full text content of README
 }
 
 interface TOCItem {
@@ -65,11 +66,11 @@ interface TOCItem {
 const i18n = {
   zh: {
     title: "Git2WeChat Pro",
-    subtitle: "一键生成专业公众号技术文章",
+    subtitle: "GitHub 项目介绍文章生成器",
     quantity: "项目数量",
     trending: "✨ 热门趋势",
     aiPick: "🤖 AI 精选",
-    generate: "开始生成视觉文章",
+    generate: "一键生成介绍文章",
     copyWeChat: "复制微信格式",
     copyMarkdown: "Markdown 源码",
     genPoster: "生成分享海报",
@@ -82,9 +83,9 @@ const i18n = {
     urlLabel: "仓库地址",
     words: "字数",
     cards: "视觉卡片",
-    loadingAnalyzing: "正在深入分析代码库...",
-    loadingRetrieving: "正在检索数据: ",
-    loadingDesigning: "正在设计封面图...",
+    loadingAnalyzing: "正在解析 README 文档...",
+    loadingRetrieving: "正在获取项目信息: ",
+    loadingDesigning: "正在梳理文章结构...", 
     loadingDrawing: "正在绘制卡片: ",
     loadingTrending: "正在抓取 GitHub Trending...",
     loadingPoster: "正在绘制海报...",
@@ -124,18 +125,15 @@ const i18n = {
     humanizing: "正在进行拟人化重写...",
     humanizeSuccess: "文章已完成去 AI 化润色！",
     structureMode: "文章偏好",
-    modeStory: "🔥 深度安利 (单项目推荐)",
-    modeTutorial: "📖 实战教程 (单项目教学)",
-    modeAnalysis: "📊 盘点合集 (多项目推荐)",
     toc: "文章目录"
   },
   en: {
     title: "Git2WeChat Pro",
-    subtitle: "One-click Professional Articles for Tech Blogs",
+    subtitle: "GitHub Project Intro Generator",
     quantity: "Quantity",
     trending: "✨ Trending",
     aiPick: "🤖 AI Pick",
-    generate: "GENERATE VISUAL ARTICLE",
+    generate: "Generate Intro Article",
     copyWeChat: "Copy WeChat Format",
     copyMarkdown: "Copy Markdown",
     genPoster: "Generate Poster",
@@ -148,9 +146,9 @@ const i18n = {
     urlLabel: "Repo URL",
     words: "Words",
     cards: "Cards",
-    loadingAnalyzing: "Deeply analyzing repository...",
+    loadingAnalyzing: "Analyzing README...",
     loadingRetrieving: "Retrieving data: ",
-    loadingDesigning: "Designing Cover Artwork",
+    loadingDesigning: "Structuring article...",
     loadingDrawing: "Drawing card: ",
     loadingTrending: "Scraping GitHub Trending...",
     loadingPoster: "Drawing poster...",
@@ -190,9 +188,6 @@ const i18n = {
     humanizing: "Humanizing text...",
     humanizeSuccess: "Text successfully humanized!",
     structureMode: "Article Preference",
-    modeStory: "🔥 Deep Dive (Single)",
-    modeTutorial: "📖 Tutorial (Single)",
-    modeAnalysis: "📊 Collection (Multi)",
     toc: "Table of Contents"
   }
 };
@@ -248,11 +243,7 @@ const FONTS = [
   { id: 'mono', name: 'Monospace', value: "'JetBrains Mono', monospace" },
 ];
 
-const STRUCTURES: {id: StructureMode, labelKey: keyof typeof i18n.zh}[] = [
-    { id: 'story', labelKey: 'modeStory' },
-    { id: 'tutorial', labelKey: 'modeTutorial' },
-    { id: 'analysis', labelKey: 'modeAnalysis' },
-];
+// Removed STRUCTURES array
 
 // --- Helper Functions ---
 
@@ -353,7 +344,6 @@ const App = () => {
   const [currentTheme, setCurrentTheme] = useState<Theme>(THEMES[0]);
   const [customPrimaryColor, setCustomPrimaryColor] = useState<string>(THEMES[0].headingDecoration);
   const [currentFont, setCurrentFont] = useState(FONTS[0]);
-  const [structureMode, setStructureMode] = useState<StructureMode>('story');
 
   const [isEditing, setIsEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -534,9 +524,24 @@ const App = () => {
         const match = line.match(/^(#{2,3})\s+(.*)/);
         if(match) {
            const level = match[1].length;
-           const text = match[2].trim();
-           const cleanText = text.replace(/\*\*/g, '').replace(/\*/g, '');
-           toc.push({ level, text: cleanText, id: slugify(cleanText) });
+           const rawText = match[2].trim();
+           // Clean text for display
+           let cleanText = rawText.replace(/\*\*/g, '').replace(/\*/g, '');
+           // Remove content in brackets (including parentheses and full-width parentheses) for TOC display
+           cleanText = cleanText.replace(/\s*\(.*?\)/g, '').replace(/\s*（.*?）/g, '');
+           // Remove leading numbering (e.g., "1. ", "1、", "1 ")
+           cleanText = cleanText.replace(/^\d+[\.\、\s]+\s*/, '');
+           
+           const lowerText = cleanText.toLowerCase();
+           if (
+               !lowerText.includes('参考资料') && 
+               !lowerText.includes('references') &&
+               !lowerText.includes('应用场景') && // Remove Application Scenarios from TOC
+               !lowerText.includes('use cases')   // Remove English equivalent
+           ) {
+               // Use rawText for ID generation to match marked's behavior so links work
+               toc.push({ level, text: cleanText.trim(), id: slugify(rawText) });
+           }
         }
       });
       return toc;
@@ -645,11 +650,22 @@ const App = () => {
 
   const fetchProjectData = async (url: string): Promise<ProjectStats> => {
     let repoPath = "";
-    try {
-      const urlObj = new URL(url);
-      const parts = urlObj.pathname.split('/').filter(Boolean);
-      if (parts.length >= 2) repoPath = `${parts[0]}/${parts[1]}`;
-    } catch (e) { console.error(e); }
+    
+    // Attempt to handle "owner/repo" format manually
+    if (/^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/.test(url)) {
+        repoPath = url;
+    } else {
+        try {
+            // Check if it's a valid URL to avoid "Invalid URL" constructor error
+            if (url && (url.startsWith('http') || url.startsWith('www'))) {
+                const urlObj = new URL(url.startsWith('www') ? `https://${url}` : url);
+                const parts = urlObj.pathname.split('/').filter(Boolean);
+                if (parts.length >= 2) repoPath = `${parts[0]}/${parts[1]}`;
+            }
+        } catch (e) { 
+            // Silently ignore invalid URLs during typing
+        }
+    }
 
     if (repoPath) {
       try {
@@ -690,6 +706,7 @@ const App = () => {
           }
 
           let extractedImages: string[] = [];
+          let readmeContent = "";
           try {
              const defaultBranch = data.default_branch || 'main';
              
@@ -699,7 +716,10 @@ const App = () => {
                  if (readmeJson.download_url) {
                     const rawRes = await fetch(readmeJson.download_url);
                     const rawText = await rawRes.text();
+                    // Extract images for card generation
                     extractedImages = extractImagesFromMarkdown(rawText, repoPath, defaultBranch);
+                    // Store text content for LLM summary (truncated to avoid overkill, though models handle large context now)
+                    readmeContent = rawText.slice(0, 50000); 
                  }
              }
           } catch (e) { console.warn("Readme image fetch failed", e); }
@@ -712,7 +732,8 @@ const App = () => {
             contributors: contributors,
             avatars: avatars,
             issues: formatNumber(data.open_issues_count),
-            images: extractedImages
+            images: extractedImages,
+            readmeContent: readmeContent
           };
         }
       } catch (e) {
@@ -726,7 +747,7 @@ const App = () => {
       const jsonMatch = result.match(/\{[\s\S]*\}/);
       if (jsonMatch) return JSON.parse(jsonMatch[0]);
     } catch (e) {
-      console.error("LLM Fallback error", e);
+      // console.error("LLM Fallback error", e);
     }
 
     return {
@@ -736,7 +757,9 @@ const App = () => {
       forks: "?",
       contributors: "?",
       issues: "?",
-      avatars: []
+      avatars: [],
+      images: [],
+      readmeContent: ""
     };
   };
 
@@ -824,23 +847,39 @@ const App = () => {
 
       const repoNamesStr = allStats.map(s => s.repoPath.split('/')[1]).join('、');
 
-      const searchInstruction = lang === 'zh' 
-        ? `**Grounding (Google Search)**:
-           - 必须使用 Google Search 获取该项目最新的 Hacker News 评论、Reddit 讨论或官方博客更新。
-           - 将这些真实评价融入文章（如“Reddit 网友评论说...”）。
-           - 补充 README 中没有的实际应用案例。`
-        : `**Grounding (Google Search)**:
-           - Must use Google Search to find recent Hacker News comments, Reddit discussions, or official blog updates.
-           - Integrate these real reviews (e.g., "A Reddit user mentioned...").
-           - Add real-world use cases not found in the README.`;
-
-      const coreGuidelines = `
-      **Core Writing Rules (CRITICAL)**:
-      1. **No AI Speak**: Avoid "In the digital age", "Revolutionary", "Game-changer", "Furthermore", "In conclusion". Use natural, conversational "Old Driver" (expert techie) tone.
-      2. **Human Touch**: Use "I found", "We developers", "Check this out". Express excitement ("This is mind-blowing!").
-      3. **Visuals**: 
-         - Use Markdown \`![]()\` for images provided in Project Info.
-         - **Mandatory**: Insert placeholders \`[PROJECT_CARD_index]\` exactly where specified in the structure.
+      // Modified Core Guidelines for Technical Structure based on README
+      const coreGuidelines = lang === 'zh' ? `
+      **核心写作原则 (基于 README)**:
+      1. **事实优先**: 
+         - 你必须**严格基于提供的 README 内容**进行写作。
+         - 如果 README 中有明确的功能列表、安装步骤或示例代码，直接引用并整理，**不要编造**多余的废话。
+         - 语气要像一个专业开发者向同事推荐工具，客观、准确、干练。
+      2. **结构化分层**:
+         - 文章必须包含清晰的章节层次 (H2, H3)。
+         - 强制包含：简介、核心功能、安装与使用、总结。
+      3. **排版规范**: 
+         - 代码块必须指明语言 (如 \`\`\`python)。
+         - 关键信息使用列表 (Bullet points)。
+      4. **视觉插图**:
+         - 必须在"项目介绍"后的位置插入 \`[PROJECT_CARD_index]\` 占位符。
+         - 如果 README 提供了图片 URL (见 Images 列表)，请在"核心功能"或"演示"部分挑选 1-2 张插入。
+      5. **标题策略**: 
+         - 标题要朴实但切中痛点，例如 "GitHub 高星项目：[项目名] - [一句话解决什么问题]"。
+      ` : `
+      **Core Writing Rules (Based on README)**:
+      1. **Fact-First**: 
+         - You must write **strictly based on the provided README content**.
+         - If the README has clear features, installation steps, or code examples, summarize and use them. **Do not invent** superfluous marketing fluff.
+         - Tone: Professional developer recommending a tool to a colleague. Concise and accurate.
+      2. **Structured Hierarchy**:
+         - Article must use clear header hierarchy (H2, H3).
+         - Mandatory sections: Introduction, Core Features, Installation/Usage, Summary.
+      3. **Formatting**: 
+         - Code blocks must specify language.
+         - Use bullet points for key info.
+      4. **Visuals**:
+         - Insert \`[PROJECT_CARD_index]\` placeholder after the intro.
+         - If Images are provided, use 1-2 real URLs in relevant sections.
       `;
 
       let prompt = "";
@@ -848,111 +887,86 @@ const App = () => {
       if (allStats.length === 1) {
           const s = allStats[0];
           
-          const sectionHeaders = lang === 'zh' 
-            ? {
-                p1: "1. 痛点与背景",
-                p2: `2. 什么是 ${s.repoPath.split('/')[1]}?`,
-                p3: "3. 核心功能",
-                p4: "4. 快速上手",
-                p5: "5. 应用场景",
-                p6: "6. 总结"
-              }
-            : {
-                p1: "1. Pain Points & Background",
-                p2: `2. What is ${s.repoPath.split('/')[1]}?`,
-                p3: "3. Key Features",
-                p4: "4. Quick Start",
-                p5: "5. Use Cases",
-                p6: "6. Conclusion"
-              };
-
           prompt = `
-          **Role**: Senior Tech Reviewer for WeChat Official Account (公众号).
-          **Task**: Write a "Must-Read" recommendation article for GitHub project "${s.repoPath}".
-          **Style**: Similar to high-quality tech blogs like "Machine Heart" (机器之心) or "QbitAI" (量子位).
-          **Preference**: ${structureMode === 'tutorial' ? 'Focus on Step-by-Step Code Tutorial' : 'Focus on Story/Problem Solving'}.
+          **Role**: Technical Editor for a Developer Blog.
+          **Task**: Write a structured introduction article for the GitHub project "${s.repoPath}".
           
-          **Project Info**:
+          **Input Data**:
           - Name: ${s.repoPath}
-          - Stars: ${s.stars}
-          - Desc: ${s.description}
-          - Images: ${s.images?.join(', ')}
+          - Description: ${s.description}
+          - **README Content**: 
+          """
+          ${s.readmeContent || "No README content found. Please search online for details."}
+          """
+          - Available Images: ${s.images && s.images.length > 0 ? s.images.join(', ') : 'None'}
           
           ${coreGuidelines}
 
           **Strict Article Structure (Markdown)**:
           
-          # [Write a Catchy, Click-Worthy Title with 1 Emoji]
+          # (Generate a clear, benefit-oriented Title)
           
-          > [Write a short, punchy intro blockquote. Hook the reader immediately.]
+          > (One sentence summary of what this project is)
           
-          ## ${sectionHeaders.p1}
-          [Start with a real-world developer pain point. "Have you ever struggled with..." or "Imagine you need to..."]
-          
-          ## ${sectionHeaders.p2}
-          [Define the project clearly. What does it solve?]
+          ## 项目介绍 (Introduction)
+          (Briefly explain what problem this project solves based on the README. Keep it simple.)
           
           [Insert visual card placeholder here: [PROJECT_CARD_0]]
           
-          ## ${sectionHeaders.p3}
-          [Bulleted list of 3-5 killer features. Be specific, not generic.]
+          ## 核心功能 (Key Features)
+          (List the features found in the README using bullet points. Use H3 for major feature groups if necessary.)
           
-          ## ${sectionHeaders.p4}
-          [MANDATORY: Provide clear code blocks for installation (pip/npm/go get) and a "Hello World" example. Code must be realistic.]
+          ## 如何使用 (How to Use/Installation)
+          (Provide the installation command and a simple "Hello World" code example from the README. Wrap in code blocks.)
           
-          ## ${sectionHeaders.p5}
-          [Where should you use this? Where should you NOT use this?]
+          ## 总结 (Conclusion)
+          (Brief verdict, link to repo: https://github.com/${s.repoPath}, and mention the Star count: ${s.stars})
           
-          ## ${sectionHeaders.p6}
-          [Final verdict. Encourage starring the repo. Link: https://github.com/${s.repoPath}]
-          
-          ${searchInstruction}
+          **IMPORTANT**: 
+          - Do not add "In conclusion" transition words.
+          - If the README is short, keep the article short. Do not bloat it.
+          - Output ONLY Markdown.
           
           **Language**: ${lang === 'zh' ? 'Chinese (Simplified)' : 'English'}.
           `;
       } else {
-          // Multi Repo Prompt - Listicle/Collection Style
-          // Logic: Intro -> List of Items (Each is a chapter) -> Summary
-          // Adjusted for clearer chapter hierarchy per project
-          
+          // Logic for multiple repos (Collections)
           prompt = `
-          **Role**: Senior Tech Curator for WeChat Official Account.
-          **Task**: Write a "Weekly Trending" or "Top Tools Collection" article.
-          **Style**: Listicle, clear separation, high information density.
+          **Role**: Open Source Curator.
+          **Task**: Write a "Weekly Collection" introducing these tools based on their READMEs.
           
           **Projects**:
-          ${allStats.map((s, i) => `${i+1}. ${s.repoPath}: ${s.description} (Stars: ${s.stars})`).join('\n')}
+          ${allStats.map((s, i) => `
+          --- Project ${i+1} ---
+          Name: ${s.repoPath}
+          README Snippet: ${s.readmeContent ? s.readmeContent.slice(0, 2000) : 'N/A'}
+          Images: ${s.images && s.images.length > 0 ? s.images.join(', ') : 'None'}
+          `).join('\n')}
           
           ${coreGuidelines}
 
-          **Strict Article Structure (Markdown)**:
+          **Structure**:
           
-          # [Write a Catchy Collective Title, e.g., "Top 5 Tools for X"]
+          # (Collection Title)
           
-          > [Intro blockquote summarizing the theme of this collection. Why these tools?]
+          > (Brief Intro)
           
           ${allStats.map((s, i) => `
           ---
-          ## ${s.repoPath.split('/')[1]}
-          
-          **一句话介绍**: [Bold one-sentence summary]
+          ## ${i+1}. ${s.repoPath.split('/')[1]}
           
           [Insert visual card placeholder here: [PROJECT_CARD_${i}]]
           
-          **推荐理由**: 
-          [Why is this in the list? What makes it special?]
-          
-          **核心功能**:
-          - [Feature 1]
-          - [Feature 2]
+          ### 项目简介
+          (Summary based on README)
+
+          ### 核心亮点
+          (Bullet points from README)
           
           **项目地址**: https://github.com/${s.repoPath}
           `).join('\n')}
           
-          ## ${lang === 'zh' ? '总结' : 'Conclusion'}
-          [Brief closing remarks.]
-          
-          ${searchInstruction}
+          ## 总结
           
           **Language**: ${lang === 'zh' ? 'Chinese (Simplified)' : 'English'}.
           `;
@@ -961,7 +975,7 @@ const App = () => {
       const resultText = await executeTextTask(prompt, false, true);
       
       const titleMatch = resultText.match(/^#\s+(.+)$/m);
-      const title = titleMatch ? titleMatch[1].trim() : (lang === 'zh' ? `精选开源项目: ${repoNamesStr}` : `Featured Projects: ${repoNamesStr}`);
+      const title = titleMatch ? titleMatch[1].trim() : (lang === 'zh' ? `开源项目介绍: ${repoNamesStr}` : `Project Intro: ${repoNamesStr}`);
       setArticleTitle(title);
 
       setArticle(resultText);
@@ -969,15 +983,8 @@ const App = () => {
       setImageLoading(true);
       
       setLoadingText(t.loadingDesigning);
-      const headerPrompt = `Masterpiece 3D isometric editorial illustration for a tech article titled "${title}". 
-      Style: Futuristic Glassmorphism mixed with soft 3D shapes. 
-      Colors: Vibrant gradient of Indigo, Violet, and Emerald Green against a dark slate background. 
-      Elements: Abstract floating code symbols, git branches, and cloud infrastructure icons. 
-      Lighting: Cinematic studio lighting, volumetric glow. 
-      Quality: 8k, Unreal Engine 5 render style, ultra-detailed, sharp focus.`;
       
-      const mainCover = await generateImage(headerPrompt);
-      setHeaderImage(mainCover);
+      setHeaderImage(null);
 
       const cards: string[] = [];
       for(let i=0; i < allStats.length; i++) {
@@ -1004,7 +1011,7 @@ const App = () => {
         urls: validUrls,
         title,
         content: resultText,
-        headerImage: mainCover,
+        headerImage: null, // No header image
         projectImages: cards,
         timestamp: Date.now()
       });
@@ -1022,16 +1029,27 @@ const App = () => {
     setHumanizing(true);
     setPublishStatus(null);
     try {
-        const prompt = `
-        **Role**: Text Humanizer Engine.
-        **Goal**: Rewrite the article to make it flow naturally like a human tech blogger.
-        **Audience**: WeChat Official Account readers.
+        const prompt = lang === 'zh' ? `
+        **角色**: 资深技术编辑。
+        **任务**: 润色这篇文章，使其更自然、流畅，但保持技术准确性。
+        
+        **严格指令**:
+        1. **结构保持**: 绝对保留 Markdown 结构，包括标题、代码块和 [PROJECT_CARD_x] 占位符。
+        2. **语言风格**: 
+           - 去除机器翻译感（如“它提供了”改为“你可以使用”）。
+           - 保持专业、客观。不要添加过于浮夸的形容词。
+           - 修正可能存在的 Markdown 格式错误。
+        
+        **输入文章**:
+        ${article}
+        ` : `
+        **Role**: Technical Editor.
+        **Task**: Polish this article to sound natural but professionally accurate.
         
         **Instructions**:
-        - Maintain the Markdown structure EXACTLY. 
-        - DO NOT remove headings, code blocks, or placeholders like [PROJECT_CARD_x].
-        - Improve flow, remove repetition, and add "burstiness" (sentence variety).
-        - Ensure tone is ${structureMode === 'tutorial' ? 'helpful and instructional' : 'enthusiastic and opinionated'}.
+        1. KEEP Markdown structure, headers, code, and placeholders [PROJECT_CARD_x].
+        2. Fix robotic phrasing.
+        3. Maintain a professional tone. Do not over-hype.
         
         **Input**:
         ${article}
@@ -1058,7 +1076,7 @@ const App = () => {
   };
 
   const drawPoster = async () => {
-     if(!headerImage || !articleTitle) return;
+     if(!articleTitle) return; // Removed headerImage check
      setPosterLoading(true);
      setPosterUrl(null);
      
@@ -1081,9 +1099,22 @@ const App = () => {
      });
 
      try {
-         const coverImg = await loadImage(headerImage);
+         // Draw Header placeholder pattern instead of image
          const coverH = W; 
-         ctx.drawImage(coverImg, 0, 0, W, coverH);
+         const patternGradient = ctx.createLinearGradient(0, 0, W, coverH);
+         patternGradient.addColorStop(0, '#4f46e5');
+         patternGradient.addColorStop(1, '#06b6d4');
+         ctx.fillStyle = patternGradient;
+         ctx.fillRect(0, 0, W, coverH);
+         
+         // Add some simple geometric shapes
+         ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+         ctx.lineWidth = 2;
+         for(let i=0; i<10; i++) {
+             ctx.beginPath();
+             ctx.arc(Math.random()*W, Math.random()*coverH, Math.random()*100 + 50, 0, Math.PI*2);
+             ctx.stroke();
+         }
          
          const gradient = ctx.createLinearGradient(0, coverH - 100, 0, coverH);
          gradient.addColorStop(0, 'rgba(0,0,0,0)');
@@ -1272,11 +1303,17 @@ const App = () => {
   };
 
   const getThemeStyles = () => `
-    .prose-content { font-family: ${currentFont.value}; color: ${currentTheme.text}; }
-    .prose-content h1 { color: ${currentTheme.headingColor}; border-bottom-color: ${customPrimaryColor}; }
+    .prose-content { font-family: ${currentFont.value}; color: ${currentTheme.text}; line-height: 2; }
+    .prose-content p { margin-bottom: 2rem; }
+    .prose-content h1 { color: ${currentTheme.headingColor}; border-bottom-color: ${customPrimaryColor}; margin-bottom: 2.5rem; }
+    .prose-content h2 { margin-top: 3.5rem; margin-bottom: 2rem; color: ${currentTheme.headingColor}; }
     .prose-content h2::before { background: ${customPrimaryColor}; }
-    .prose-content blockquote { background: ${currentTheme.secondaryBg}; border-left-color: ${customPrimaryColor}; }
+    .prose-content h3 { margin-top: 2.5rem; margin-bottom: 1.5rem; color: ${currentTheme.text}; opacity: 0.9; border-left: 3px solid ${customPrimaryColor}; padding-left: 10px; }
+    .prose-content blockquote { background: ${currentTheme.secondaryBg}; border-left-color: ${customPrimaryColor}; margin-bottom: 2.5rem; }
     .prose-content strong { color: ${customPrimaryColor}; }
+    .prose-content ul, .prose-content ol { margin-bottom: 2.5rem; }
+    .prose-content li { margin-bottom: 1rem; }
+    .prose-content img { margin-top: 2rem; margin-bottom: 2rem; }
     /* TOC Styles */
     .toc-link:hover { color: ${customPrimaryColor}; border-left-color: ${customPrimaryColor}; }
   `;
@@ -1323,18 +1360,6 @@ const App = () => {
             ))}
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {STRUCTURES.map(s => (
-                  <button 
-                    key={s.id} 
-                    onClick={() => setStructureMode(s.id)}
-                    className={`p-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${structureMode === s.id ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg scale-105' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
-                  >
-                     {t[s.labelKey]}
-                  </button>
-              ))}
-          </div>
-
           <button onClick={() => generateArticle()} disabled={loading} className={`w-full py-5 rounded-2xl font-bold text-white transition-all shadow-xl tracking-wide ${loading ? 'bg-slate-800' : 'bg-indigo-600 hover:bg-indigo-500 active:translate-y-0.5'}`}>
             {loading ? <div className="flex items-center justify-center gap-3"><svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>{loadingText}</div> : t.generate}
           </button>
@@ -1391,9 +1416,11 @@ const App = () => {
               </div>
 
               <div className="rounded-3xl overflow-hidden shadow-2xl transition-all border border-white/5" style={{ backgroundColor: currentTheme.bg }}>
-                <div className="w-full relative min-h-[100px] border-b border-white/5 bg-slate-900">
-                  {headerImage ? <img src={headerImage} className="w-full h-auto object-cover" alt="Article Header" /> : imageLoading && <div className="h-48 flex flex-col items-center justify-center animate-pulse gap-3"><div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div><span className="text-indigo-400 font-bold uppercase tracking-widest text-[10px]">{t.loadingDesigning}</span></div>}
-                </div>
+                {headerImage && (
+                    <div className="w-full relative min-h-[100px] border-b border-white/5 bg-slate-900">
+                      <img src={headerImage} className="w-full h-auto object-cover" alt="Article Header" />
+                    </div>
+                )}
                 {isEditing ? (
                   <textarea value={article} onChange={(e) => setArticle(e.target.value)} className="w-full h-[700px] p-10 md:p-16 font-mono text-sm bg-transparent outline-none resize-none leading-relaxed" style={{ color: currentTheme.text }} />
                 ) : (
