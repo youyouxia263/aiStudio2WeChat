@@ -178,7 +178,10 @@ const i18n = {
     scanQrTip: "请使用手机 App 扫码登录",
     scanSuccess: "扫码成功，正在登录...",
     loginSuccess: "登录成功",
-    manualInput: "手动输入凭证"
+    manualInput: "手动输入凭证",
+    disconnect: "断开连接",
+    statusConnected: "已连接",
+    statusNotConnected: "未连接"
   },
   en: {
     title: "Git2WeChat Pro",
@@ -268,7 +271,10 @@ const i18n = {
     scanQrTip: "Please scan with mobile app",
     scanSuccess: "Scanned successfully, logging in...",
     loginSuccess: "Login Successful",
-    manualInput: "Manual Input"
+    manualInput: "Manual Input",
+    disconnect: "Disconnect",
+    statusConnected: "Connected",
+    statusNotConnected: "Not Connected"
   }
 };
 
@@ -327,23 +333,26 @@ const FONTS = [
 
 const fetchGithubTrending = async (): Promise<string[]> => {
   try {
-    const res = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://github.com/trending?since=daily'));
-    if (!res.ok) throw new Error("Failed to fetch trending");
-    const html = await res.text();
-    const regex = /<h2[^>]*>\s*<a[^>]*href=["']\/?([^"']+)["'][^>]*>/g;
-    const matches: string[] = [];
-    let match;
-    while ((match = regex.exec(html)) !== null) {
-      const path = match[1];
-      if (path && path.split('/').length === 2 && !matches.includes(`https://github.com/${path}`)) {
-         matches.push(`https://github.com/${path}`);
-      }
-      if (matches.length >= 10) break; 
+    // Switch to GitHub Search API which is more stable than scraping
+    // Query: created within last 7 days, sort by stars
+    const date = new Date();
+    date.setDate(date.getDate() - 7);
+    const dateString = date.toISOString().split('T')[0];
+    
+    const res = await fetch(`https://api.github.com/search/repositories?q=created:>${dateString}&sort=stars&order=desc&per_page=10`);
+    
+    if (!res.ok) {
+       // If rate limited or error, throw to trigger fallback
+       throw new Error(`GitHub API Error: ${res.status}`);
     }
-    return matches;
+    
+    const data = await res.json();
+    if (!data.items || !Array.isArray(data.items)) return [];
+    
+    return data.items.map((item: any) => item.html_url);
   } catch (e) {
-    console.error("Trending scrape failed", e);
-    return [];
+    console.error("Trending fetch failed", e);
+    return []; // Return empty to trigger AI fallback
   }
 };
 
@@ -1669,8 +1678,8 @@ const App = () => {
                             </div>
                             <div>
                               <div className="font-bold text-sm text-white">{t.platforms[p.id]}</div>
-                              <div className={`text-[10px] font-bold uppercase tracking-wider ${p.isConnected ? 'text-indigo-400' : 'text-slate-500'}`}>
-                                {p.isConnected ? (p.loginMethod === 'qrcode' ? 'Via QRCode' : 'Via Cookie') : 'Not Connected'}
+                              <div className={`text-[10px] font-bold uppercase tracking-wider ${p.isConnected ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                {p.isConnected ? t.statusConnected : t.statusNotConnected}
                               </div>
                             </div>
                           </div>
@@ -1678,7 +1687,7 @@ const App = () => {
                             onClick={() => togglePlatformConnect(p)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${p.isConnected ? 'border-red-500/30 text-red-400 hover:bg-red-500/10' : 'border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10'}`}
                           >
-                            {p.isConnected ? 'Disconnect' : t.connect}
+                            {p.isConnected ? t.disconnect : t.connect}
                           </button>
                         </div>
                       ))}
