@@ -409,7 +409,7 @@ const extractImagesFromMarkdown = (markdown: string, repoPath: string, defaultBr
   }
 
   const sorted = candidates.sort((a, b) => b.score - a.score);
-  return Array.from(new Set(sorted.map(c => c.url))).slice(0, 5); 
+  return Array.from(new Set(sorted.map(c => c.url))).slice(0, 15); 
 };
 
 const slugify = (text: string) => text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-').replace(/^-+|-+$/g, '');
@@ -980,7 +980,9 @@ const App = () => {
          - 代码块必须指明语言 (如 \`\`\`bash, \`\`\`python)。
          - 关键信息使用列表 (Bullet points)。
       4. **视觉插图**:
-         - 如果 README 提供了图片 URL (见 Images 列表)，请在"核心功能"或"演示"部分挑选 1-2 张插入。
+         - 如果 README 提供了图片 URL (见 Available Images 列表)，请务必在文章中插入这些图片，特别是展示核心功能或界面的图片。请直接使用列表中提供的 URL，不要修改。
+       5. **技术深度**:
+          - 使用专业的开发者术语。避免过度简化。假设读者是资深工程师。
       ` : `
       **Core Writing Rules (Based on README)**:
       1. **Fact-First**: 
@@ -997,7 +999,9 @@ const App = () => {
          - Code blocks must specify language.
          - Use bullet points.
       4. **Visuals**:
-         - If Images are provided, use 1-2 real URLs in relevant sections.
+         - If Images are provided in the 'Available Images' list, you MUST include them in the article, especially those showing key features or UI. Use the exact URLs provided.
+       5. **Technical Depth**:
+          - Use professional developer terminology. Avoid over-simplification. Assume the reader is a senior engineer.
       `;
 
       let prompt = "";
@@ -1006,8 +1010,8 @@ const App = () => {
           const s = allStats[0];
           
           prompt = `
-          **Role**: Technical Editor for a Developer Blog.
-          **Task**: Write a structured introduction article for the GitHub project "${s.repoPath}".
+          **Role**: Senior Technical Editor for an Expert Developer Blog.
+          **Task**: Write a structured, in-depth introduction article for the GitHub project "${s.repoPath}".
           
           **Input Data**:
           - Name: ${s.repoPath}
@@ -1016,7 +1020,8 @@ const App = () => {
           """
           ${s.readmeContent || "No README content found. Please search online for details."}
           """
-          - Available Images: ${s.images && s.images.length > 0 ? s.images.join(', ') : 'None'}
+          - Available Images: 
+          ${s.images && s.images.length > 0 ? s.images.map((img, i) => `${i+1}. ${img}`).join('\n          ') : 'None'}
           
           ${coreGuidelines}
 
@@ -1045,7 +1050,7 @@ const App = () => {
       } else {
           // Logic for multiple repos (Collections)
           prompt = `
-          **Role**: Open Source Curator.
+          **Role**: Senior Open Source Curator.
           **Task**: Write a "Weekly Collection" introducing these tools based on their READMEs.
           
           **Projects**:
@@ -1150,7 +1155,7 @@ const App = () => {
         1. **结构保持**: 绝对保留 Markdown 结构，包括标题 (H2, H3)、代码块和 [PROJECT_CARD_x] 占位符。
         2. **语言风格**: 
            - 去除机器翻译感。
-           - 保持专业、客观。
+           - 保持专业、客观，使用地道的技术术语。
         
         **输入文章**:
         ${article}
@@ -1160,7 +1165,7 @@ const App = () => {
         
         **Instructions**:
         1. KEEP Markdown structure, headers (H2, H3), code, and placeholders [PROJECT_CARD_x].
-        2. Fix robotic phrasing.
+        2. Fix robotic phrasing. Use expert developer terminology.
         
         **Input**:
         ${article}
