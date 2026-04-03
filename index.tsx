@@ -18,6 +18,7 @@ interface LLMConfig {
   baseUrl: string;
   model: string;
   imageModel: string;
+  apiKey?: string;
 }
 
 interface PlatformConfig {
@@ -44,6 +45,7 @@ type Theme = {
   codeText: string;
   borderColor: string;
   isGradientHeading?: boolean;
+  headerStyle?: 'default' | 'boxed';
 };
 
 interface HistoryEntry {
@@ -126,6 +128,7 @@ const i18n = {
     globalSettings: "全局配置",
     llmEngine: "大模型引擎",
     provider: "服务商",
+    apiKey: "API Key",
     baseUrl: "接口地址 (Base URL)",
     textModel: "文本模型 ID",
     imageModel: "图片模型 ID",
@@ -219,6 +222,7 @@ const i18n = {
     globalSettings: "Global Settings",
     llmEngine: "LLM Model Engine",
     provider: "Provider",
+    apiKey: "API Key",
     baseUrl: "Base URL",
     textModel: "Text Model ID",
     imageModel: "Image Model ID",
@@ -320,6 +324,21 @@ const THEMES: Theme[] = [
     codeText: '#93c5fd',
     borderColor: '#1e3a8a',
     isGradientHeading: false,
+  },
+  {
+    id: 'tech-blue',
+    name: 'Tech Blue (WeChat Pro)',
+    bg: '#ffffff',
+    text: '#333333',
+    headingColor: '#1e3a8a',
+    headingDecoration: '#2563eb',
+    secondaryBg: '#eff6ff',
+    blockquoteBorder: '#2563eb',
+    codeBg: '#1e293b',
+    codeText: '#bfdbfe',
+    borderColor: '#bfdbfe',
+    isGradientHeading: false,
+    headerStyle: 'boxed'
   }
 ];
 
@@ -368,7 +387,7 @@ const extractImagesFromMarkdown = (markdown: string, repoPath: string, defaultBr
   };
 
   const processUrl = (url: string, altText: string = "") => {
-    url = url.trim();
+    url = url.trim().split(/\s+/)[0]; // Remove markdown titles if any
     if (!url) return;
     
     if (url.match(/(shield\.io|badge|travis|ci|codecov|circleci|icon|logo|npm|sponsors|backers|contributors|graph|hit|activity|analytics|tracker)/i)) return;
@@ -378,7 +397,7 @@ const extractImagesFromMarkdown = (markdown: string, repoPath: string, defaultBr
     if (!url.startsWith('http')) {
         let cleanPath = url.replace(/^(\.\/|\/)/, '');
         url = `${rawBase}/${cleanPath}`;
-    } else {
+    } else if (url.includes('github.com') && url.includes('/blob/')) {
         url = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
     }
 
@@ -610,7 +629,7 @@ const App = () => {
       renderer: {
         image(token: { href: string; title: string | null; text: string }) {
           const { href, title, text } = token;
-          return `<img src="${href}" alt="${text || ''}" title="${title || ''}" class="w-full rounded-xl my-6 shadow-xl ring-1 ring-white/10" style="max-width:100%;" onerror="this.style.display='none'">`;
+          return `<img src="${href}" alt="${text || ''}" title="${title || ''}" class="w-full rounded-xl my-6 shadow-xl ring-1 ring-white/10" style="max-width:100%;" referrerPolicy="no-referrer" onerror="this.style.display='none'">`;
         },
         heading(token) {
            const text = token.text;
@@ -795,7 +814,7 @@ const App = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.API_KEY}`
+          'Authorization': `Bearer ${llmConfig.apiKey || ''}`
         },
         body: JSON.stringify({
           model: llmConfig.model,
@@ -828,7 +847,7 @@ const App = () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.API_KEY}`
+            'Authorization': `Bearer ${llmConfig.apiKey || ''}`
           },
           body: JSON.stringify({
             model: llmConfig.imageModel,
@@ -1086,10 +1105,19 @@ const App = () => {
       3. **Formatting**: 
          - Code blocks must specify language.
          - Use bullet points.
-      4. **Visuals**:
-         - If Images are provided in the 'Available Images' list, you MUST include them in the article, especially those showing key features or UI. Use the exact URLs provided.
+      4. **Visuals (CRITICAL & ABSOLUTELY MANDATORY)**:
+         - If the 'Available Images' list is NOT empty, you MUST embed at least 1-3 images into the article.
+         - **Placement**: Insert images immediately after the section they illustrate (e.g., UI screenshots in "Key Features").
+         - **Format**: Use standard Markdown image syntax: \`![description](<url>)\`.
+         - **Source**: ONLY use URLs from the "Available Images" list below. Do not make up URLs.
        5. **Technical Depth**:
           - Use professional developer terminology. Avoid over-simplification. Assume the reader is a senior engineer.
+       6. **Spoken Broadcast Script (1-Minute Video Script)**:
+          - At the very end of the output, add a horizontal rule \`---\`.
+          - Add a heading \`## 🎙️ 1分钟口播文案 (1-Minute Spoken Script)\`.
+          - Write an engaging, fast-paced script for a short video (Douyin/TikTok/Reels).
+          - Length: ~200-250 characters (about 1 minute of speaking).
+          - Structure: 3-second hook -> Core pain point solved -> Magic feature -> Call to action (Star the repo).
       `;
 
       let prompt = "";
@@ -1127,11 +1155,18 @@ const App = () => {
           ## 核心功能 (Key Features)
           (List the features found in the README using bullet points.)
           
+          (REPLACE THIS LINE WITH ACTUAL MARKDOWN IMAGES FROM THE 'Available Images' LIST, e.g., ![demo](url))
+          
           ## 快速开始 (Quick Start)
           (Provide the installation command and a simple usage code example from the README. Wrap in code blocks.)
           
           ## 总结 (Conclusion)
           (Brief verdict, link to repo: https://github.com/${s.repoPath})
+          
+          ---
+          
+          ## 🎙️ 1分钟口播文案
+          (1-minute engaging spoken script here)
           
           **Language**: ${lang === 'zh' ? 'Chinese (Simplified)' : 'English'}.
           `;
@@ -1579,21 +1614,50 @@ const App = () => {
     setLlmConfig(newConfig);
   };
 
-  const getThemeStyles = () => `
+  const getThemeStyles = () => {
+    let h2Style = `
+      .prose-content h2 { margin-top: 3.5rem; margin-bottom: 2rem; color: ${currentTheme.headingColor}; }
+      .prose-content h2::before { background: ${customPrimaryColor}; }
+    `;
+
+    if (currentTheme.headerStyle === 'boxed') {
+        h2Style = `
+            .prose-content h2 {
+                margin-top: 3.5rem;
+                margin-bottom: 2rem;
+                color: ${currentTheme.headingColor};
+                background: ${currentTheme.secondaryBg};
+                padding: 10px 15px;
+                border-left: 5px solid ${customPrimaryColor};
+                border-radius: 4px;
+                font-size: 1.25em;
+                font-weight: bold;
+            }
+        `;
+    }
+
+    return `
     .prose-content { font-family: ${currentFont.value}; color: ${currentTheme.text}; line-height: 2; }
     .prose-content p { margin-bottom: 2rem; }
     .prose-content h1 { color: ${currentTheme.headingColor}; border-bottom-color: ${customPrimaryColor}; margin-bottom: 2.5rem; }
-    .prose-content h2 { margin-top: 3.5rem; margin-bottom: 2rem; color: ${currentTheme.headingColor}; }
-    .prose-content h2::before { background: ${customPrimaryColor}; }
+    ${h2Style}
     .prose-content h3 { margin-top: 2.5rem; margin-bottom: 1.5rem; color: ${currentTheme.text}; opacity: 0.9; border-left: 3px solid ${customPrimaryColor}; padding-left: 10px; }
     .prose-content blockquote { background: ${currentTheme.secondaryBg}; border-left-color: ${customPrimaryColor}; margin-bottom: 2.5rem; }
     .prose-content strong { color: ${customPrimaryColor}; }
     .prose-content ul, .prose-content ol { margin-bottom: 2.5rem; }
     .prose-content li { margin-bottom: 1rem; }
-    .prose-content img { margin-top: 2rem; margin-bottom: 2rem; }
+    .prose-content img { 
+      margin: 2rem auto; 
+      max-width: 100%; 
+      height: auto; 
+      border-radius: 8px; 
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      display: block;
+    }
     /* TOC Styles */
     .toc-link:hover { color: ${customPrimaryColor}; border-left-color: ${customPrimaryColor}; }
   `;
+  };
 
   if (!isAuthenticated) {
     return <Login onLogin={handleLoginSuccess} />;
@@ -1944,6 +2008,10 @@ const App = () => {
                     </div>
                     {llmConfig.provider !== 'gemini' && (
                        <div className="space-y-3 bg-slate-800/50 p-4 rounded-xl border border-white/5">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.apiKey}</label>
+                            <input type="password" value={llmConfig.apiKey || ''} onChange={(e) => setLlmConfig({...llmConfig, apiKey: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" placeholder="sk-..." />
+                          </div>
                           <div>
                             <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{t.baseUrl}</label>
                             <input type="text" value={llmConfig.baseUrl} onChange={(e) => setLlmConfig({...llmConfig, baseUrl: e.target.value})} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" />
