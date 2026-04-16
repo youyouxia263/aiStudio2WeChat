@@ -120,7 +120,7 @@ async function processTask(taskId: string, repoUrl: string) {
            - ## Key Features
            - ## Installation & Usage
            - ## Use Cases (Optional)
-           - ## Conclusion
+           - ## 写在最后
          - Insert \`[PROJECT_CARD_index]\` placeholder after the Introduction.
       3. **Formatting**: 
          - Code blocks must specify language.
@@ -130,18 +130,17 @@ async function processTask(taskId: string, repoUrl: string) {
          - **Placement**: Insert images immediately after the section they illustrate (e.g., UI screenshots in "Key Features").
          - **Format**: Use standard Markdown image syntax: \`![description](<url>)\`.
          - **Source**: ONLY use URLs from the "Available Images" list below. Do not make up URLs.
-      5. **Technical Depth**:
-         - Use professional developer terminology. Avoid over-simplification. Assume the reader is a senior engineer.
-      6. **Spoken Broadcast Script (1-Minute Video Script)**:
-         - At the very end of the output, add a horizontal rule \`---\`.
-         - Add a heading \`## 🎙️ 1分钟口播文案 (1-Minute Spoken Script)\`.
-         - Write an engaging, fast-paced script for a short video (Douyin/TikTok/Reels).
-         - Length: ~200-250 characters (about 1 minute of speaking).
-         - Structure: 3-second hook -> Core pain point solved -> Magic feature -> Call to action (Star the repo).
+      5. **Tone & Style (CRITICAL & STRICT)**:
+         - **Extreme Brevity (极简短句)**: Use very short, punchy sentences. Break long sentences into smaller ones. Write like a casual WeChat Moments post or a tweet.
+         - **Data & Facts First**: Highlight numbers immediately (e.g., "两个月从零冲到 1.4 万的Star", "有 30 个专业 Agent 角色").
+         - **Conversational & Grounded (极度接地气)**: Write as if chatting with a developer friend. Use casual connectors like "跟...一样", "直接", "就行", "还支持".
+         - **BANNED WORDS (绝对禁用)**: Do NOT use any marketing fluff, corporate jargon, or formal transitions. You are FORBIDDEN from using phrases like: "正是为了解决这一痛点而生", "旨在", "致力于", "提供了一套", "不仅...更...", "跃迁", "赋能", "生态", "矩阵", "往往会陷入...迷茫".
+         - **Clean Markdown Emphasis**: For text emphasis (bolding, coloring), ONLY use standard Markdown `**bold**` syntax. NEVER use HTML tags like `<font>`, `<span>`, or `<b>`.
+         - **Example Style**: "oh-my-codex 跟上面那个 oh-my-claudecode 是同一个作者。把类似的多 Agent 编排理念移植到了 OpenAI Codex CLI 上。两个月从零冲到 1.4 万的Star，增长速度在开源项目里相当少见。有 30 个专业 Agent 角色和 40 多个 Skill。支持在 tmux 里启动最多 20 个 Worker 并行干活。npm install -g oh-my-codex 之后 omx setup 就行。"
     `;
 
     const prompt = `
-      **Role**: Senior Technical Editor for an Expert Developer Blog.
+      **Role**: Engaging Tech Storyteller and Developer Advocate.
       **Task**: Write a structured, in-depth introduction article for the GitHub project "${repoPath}".
       
       **Input Data**:
@@ -163,25 +162,20 @@ async function processTask(taskId: string, repoUrl: string) {
       > (One sentence summary)
       
       ## 项目简介 (Introduction)
-      (Briefly explain what problem this project solves based on the README.)
+      (Write 3-4 extremely short, casual sentences explaining what it is, who made it, and any impressive stats like stars/growth. Do NOT use any banned marketing words. Be direct and conversational.)
       
       [Insert visual card placeholder here: [PROJECT_CARD_0]]
       
       ## 核心功能 (Key Features)
-      (List the features found in the README using bullet points.)
+      (List the features using very short, casual bullet points. E.g., "支持在 tmux 里启动最多 20 个 Worker 并行干活。")
       
       (REPLACE THIS LINE WITH ACTUAL MARKDOWN IMAGES FROM THE 'Available Images' LIST, e.g., ![demo](url))
       
       ## 快速开始 (Quick Start)
-      (Provide the installation command and a simple usage code example from the README. Wrap in code blocks.)
+      (Provide the installation command and a casual 1-sentence explanation. E.g., "npm install -g oh-my-codex 之后 omx setup 就行。")
       
-      ## 总结 (Conclusion)
+      ## 写在最后
       (Brief verdict, link to repo: https://github.com/${repoPath})
-      
-      ---
-      
-      ## 🎙️ 1分钟口播文案
-      (1-minute engaging spoken script here)
       
       **Language**: Chinese (Simplified).
     `;
