@@ -107,8 +107,8 @@ const i18n = {
     preview: "预览效果",
     history: "历史记录",
     settings: "系统设置",
-    placeholder: "https://github.com/owner/repo",
-    urlLabel: "仓库地址",
+    placeholder: "https://github.com/owner/repo (可空格分隔补充相关网址)",
+    urlLabel: "项目地址",
     words: "字数",
     cards: "视觉卡片",
     loadingAnalyzing: "正在解析 README 文档...",
@@ -145,6 +145,7 @@ const i18n = {
     clearAll: "清除全部历史",
     storageFull: "存储空间不足，已自动清理旧记录图片。",
     visualStyle: "视觉风格",
+    promptStyle: "写作风格",
     articleTheme: "文章主题",
     articleFont: "文章字体",
     posterTitle: "朋友圈分享海报",
@@ -201,8 +202,8 @@ const i18n = {
     preview: "Preview",
     history: "History",
     settings: "Settings",
-    placeholder: "https://github.com/owner/repo",
-    urlLabel: "Repo URL",
+    placeholder: "https://github.com/owner/repo (space-separated extra URLs)",
+    urlLabel: "Project URL",
     words: "Words",
     cards: "Cards",
     loadingAnalyzing: "Analyzing README...",
@@ -239,6 +240,7 @@ const i18n = {
     clearAll: "Clear All History",
     storageFull: "Storage nearly full. Old entry images pruned.",
     visualStyle: "Visual Style",
+    promptStyle: "Writing Style",
     articleTheme: "Article Theme",
     articleFont: "Article Font",
     posterTitle: "Social Share Poster",
@@ -281,6 +283,56 @@ const i18n = {
     statusNotConnected: "Not Connected"
   }
 };
+
+interface PromptStyle {
+  id: string;
+  name: string;
+  role: string;
+  toneGuidelines: string;
+}
+
+const PROMPT_STYLES: PromptStyle[] = [
+  {
+    id: 'casual',
+    name: '极简口语风',
+    role: 'Expert Anti-AI Writing Editor and Engaging Tech Storyteller.',
+    toneGuidelines: `
+          - **Anti-AI Generation (Critical)**: Completely remove sterile, robotic "AI-generated" tone. Give it a real human pulse based on Wikipedia's "Signs of AI writing".
+          - **Eradicate AI Patterns**: Remove inflated significance ("testament", "pivotal moment", "旨在", "不仅是...更是..."). Remove superficial "-ing" fluff. Break up mechanical "Rule of Three" lists. Use Active Voice & Direct Language.
+          - **Extreme Brevity & Grounded (极简口语 & 接地气)**: Use very short, punchy sentences. Break long sentences into smaller ones. Write as if chatting with a developer friend. Use casual connectors ("跟...一样", "直接", "就行").
+          - **Data & Facts First**: Highlight numbers immediately (e.g., "两个月从零冲到 1.4 万的Star", "有 30 个专业 Agent").
+          - **Soul & Personality**: Add opinions, vary sentence rhythm (mix short and flowing), include mild developer complaints/insights. DO NOT sound like a corporate press release.
+          - **Example Style**: "oh-my-codex 跟上面那个 oh-my-claudecode 是同一个作者。把类似的多 Agent 编排理念移植到了 OpenAI Codex CLI 上。两个月从零冲到 1.4 万的Star，增长速度在开源项目里相当少见。有 30 个专业 Agent 角色和 40 多个 Skill。支持在 tmux 里启动最多 20 个 Worker 并行干活。npm install -g oh-my-codex 之后 omx setup 就行。"
+          - **Clean Markdown Emphasis**: For text emphasis, ONLY use standard Markdown \`**bold**\` syntax. NEVER use HTML tags (\`<font>\`, \`<span>\`, \`<b>\`).
+    `
+  },
+  {
+    id: 'professional',
+    name: '专业技术风',
+    role: 'Expert Technical Editor and Anti-AI Writing Reviewer.',
+    toneGuidelines: `
+          - **Anti-AI Generation (Critical)**: Completely remove sterile "AI-generated" tone based on Wikipedia's "Signs of AI writing". Do NOT use "seamless", "robust", "revolutionize", or "empower". Use precise, objective phrasing.
+          - **Eradicate AI Patterns**: Do not use "It stands as...". Use simple copulas ("is", "are"). Remove "-ing" participial padding. Avoid the "Rule of Three" formulaic lists.
+          - **Professional Tone**: Use precise, professional developer terminology. Assume the reader is a senior engineer.
+          - **Structured & In-Depth**: Focus on architecture, technical highlights, and deep capabilities. Explain *how* it works, not just *what* it does.
+          - **Soul & Insight**: Even in professional writing, keep a human pulse. Vary rhythms. Synthesize complexity naturally rather than using boilerplate "Due to the fact that..." transitions.
+          - **Clean Markdown Emphasis**: For text emphasis, ONLY use standard Markdown \`**bold**\` syntax. NEVER use HTML tags (\`<font>\`, \`<span>\`, \`<b>\`).
+    `
+  },
+  {
+    id: 'humorous',
+    name: '幽默段子风',
+    role: 'Funny, Sarcastic Tech Influencer & Anti-AI Writer.',
+    toneGuidelines: `
+          - **Anti-AI Generation (Critical)**: AI tries to sound upbeat and helpful. You must sound slightly cynical, sarcastic, and deeply human. No "In conclusion," no "Let's dive in", no "This tool is a testament to...".
+          - **Humorous & Sarcastic**: Use witty analogies and sarcastic humor common among programmers (e.g., complaining about manual labor, obscure bugs, bad PMs, or sleep deprivation).
+          - **Pain-Point Exaggeration**: Dramatize the problem the tool solves before introducing the solution. Act like this tool is saving you from a terrible alternative.
+          - **Eradicate Formulaic AI**: Never use the "Rule of Three" or generic corporate endings. Let your sentences be messy and opinionated.
+          - **Emoji Usage**: Use appropriate emojis to make it lively.
+          - **Clean Markdown Emphasis**: For text emphasis, ONLY use standard Markdown \`**bold**\` syntax. NEVER use HTML tags (\`<font>\`, \`<span>\`, \`<b>\`).
+    `
+  }
+];
 
 const THEMES: Theme[] = [
   {
@@ -538,6 +590,7 @@ const App = () => {
   const [currentTheme, setCurrentTheme] = useState<Theme>(THEMES[0]);
   const [customPrimaryColor, setCustomPrimaryColor] = useState<string>(THEMES[0].headingDecoration);
   const [currentFont, setCurrentFont] = useState(FONTS[0]);
+  const [currentPromptStyle, setCurrentPromptStyle] = useState<PromptStyle>(PROMPT_STYLES[0]);
 
   const [isEditing, setIsEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -602,6 +655,12 @@ const App = () => {
       if (font) setCurrentFont(font);
     }
 
+    const savedPromptId = localStorage.getItem('git2wechat_prompt_style');
+    if (savedPromptId) {
+      const ps = PROMPT_STYLES.find(p => p.id === savedPromptId);
+      if (ps) setCurrentPromptStyle(ps);
+    }
+
     const savedPlatforms = localStorage.getItem('git2wechat_platforms');
     if (savedPlatforms) {
         try {
@@ -649,6 +708,10 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('git2wechat_font', currentFont.id);
   }, [currentFont.id]);
+
+  useEffect(() => {
+    localStorage.setItem('git2wechat_prompt_style', currentPromptStyle.id);
+  }, [currentPromptStyle.id]);
 
   const savePlatforms = (newPlatforms: PlatformConfig[]) => {
       setPlatforms(newPlatforms);
@@ -870,22 +933,58 @@ const App = () => {
     return num.toString();
   };
 
-  const fetchProjectData = async (url: string): Promise<ProjectStats> => {
+  const fetchProjectData = async (urlString: string): Promise<ProjectStats> => {
     let repoPath = "";
     
+    const urls = urlString.trim().split(/[\s,]+/).filter(Boolean);
+    let mainGithubUrl = urls.find(u => u.includes('github.com') || /^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/.test(u));
+    if (!mainGithubUrl && urls.length > 0) {
+        mainGithubUrl = urls[0];
+    }
+    const extraUrls = urls.filter(u => u !== mainGithubUrl);
+    
     // Attempt to handle "owner/repo" format manually
-    if (/^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/.test(url)) {
-        repoPath = url;
-    } else {
-        try {
-            // Check if it's a valid URL to avoid "Invalid URL" constructor error
-            if (url && (url.startsWith('http') || url.startsWith('www'))) {
-                const urlObj = new URL(url.startsWith('www') ? `https://${url}` : url);
-                const parts = urlObj.pathname.split('/').filter(Boolean);
-                if (parts.length >= 2) repoPath = `${parts[0]}/${parts[1]}`;
+    if (mainGithubUrl) {
+        if (/^[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/.test(mainGithubUrl)) {
+            repoPath = mainGithubUrl;
+        } else {
+            try {
+                // Check if it's a valid URL to avoid "Invalid URL" constructor error
+                if (mainGithubUrl.startsWith('http') || mainGithubUrl.startsWith('www')) {
+                    const urlObj = new URL(mainGithubUrl.startsWith('www') ? `https://${mainGithubUrl}` : mainGithubUrl);
+                    const parts = urlObj.pathname.split('/').filter(Boolean);
+                    if (parts.length >= 2) repoPath = `${parts[0]}/${parts[1]}`;
+                }
+            } catch (e) { 
+                // Silently ignore invalid URLs during typing
             }
-        } catch (e) { 
-            // Silently ignore invalid URLs during typing
+        }
+    }
+
+    let extraContent = "";
+    if (extraUrls.length > 0) {
+        for (const exUrl of extraUrls) {
+            try {
+                let formattedUrl = exUrl;
+                if (!formattedUrl.startsWith('http')) {
+                    formattedUrl = 'https://' + formattedUrl;
+                }
+                const proxyRes = await fetch(`/api/proxy`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: `https://r.jina.ai/${formattedUrl}` })
+                });
+                if (proxyRes.ok) {
+                    const data = await proxyRes.json();
+                    if (data.content) {
+                        extraContent += `\n\n--- Content from ${formattedUrl} ---\n\n${data.content.slice(0, 15000)}\n`;
+                    }
+                } else {
+                     console.warn("Proxy returned error:", proxyRes.status);
+                }
+            } catch(e) {
+                console.warn("Failed to fetch extra url via proxy:", exUrl, e);
+            }
         }
     }
 
@@ -938,13 +1037,13 @@ const App = () => {
                  if (readmeJson.download_url) {
                     const rawRes = await fetch(readmeJson.download_url);
                     const rawText = await rawRes.text();
-                    // Extract images for card generation
                     extractedImages = extractImagesFromMarkdown(rawText, repoPath, defaultBranch);
-                    // Store text content for LLM summary (truncated to avoid overkill, though models handle large context now)
-                    readmeContent = rawText.slice(0, 50000); 
+                    readmeContent = (rawText + extraContent).slice(0, 50000); 
                  }
+             } else {
+                 readmeContent = extraContent.slice(0, 50000);
              }
-          } catch (e) { console.warn("Readme image fetch failed", e); }
+          } catch (e) { console.warn("Readme image fetch failed", e); readmeContent = extraContent.slice(0, 50000); }
 
           return {
             repoPath: data.full_name,
@@ -963,16 +1062,7 @@ const App = () => {
       }
     }
 
-    try {
-      const prompt = `Search for current GitHub stats for ${url} including exact number of contributors. Return ONLY a valid JSON string: {"repoPath": "${repoPath || 'owner/repo'}", "description": "...", "stars": "10k", "forks": "2k", "contributors": "100+", "issues": "50"}. Description language: ${lang === 'zh' ? 'Chinese' : 'English'}.`;
-      const result = await executeTextTask(prompt, false);
-      const jsonMatch = result.match(/\{[\s\S]*\}/);
-      if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      // console.error("LLM Fallback error", e);
-    }
-
-    return {
+    let stats: ProjectStats = {
       repoPath: repoPath || "unknown/repo",
       description: "Innovative open-source project.",
       stars: "?",
@@ -981,8 +1071,24 @@ const App = () => {
       issues: "?",
       avatars: [],
       images: [],
-      readmeContent: ""
+      readmeContent: extraContent.slice(0, 50000)
     };
+
+    try {
+      const searchUrl = mainGithubUrl || urlString;
+      const prompt = `Search for current GitHub stats for ${searchUrl} including exact number of contributors. Return ONLY a valid JSON string: {"repoPath": "${repoPath || 'owner/repo'}", "description": "...", "stars": "10k", "forks": "2k", "contributors": "100+", "issues": "50"}. Description language: ${lang === 'zh' ? 'Chinese' : 'English'}.`;
+      const result = await executeTextTask(prompt, false);
+      const jsonMatch = result.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          stats = { ...stats, ...parsed, readmeContent: extraContent.slice(0, 50000) };
+          return stats;
+      }
+    } catch (e) {
+      // console.error("LLM Fallback error", e);
+    }
+
+    return stats;
   };
 
   const compositeAvatars = async (baseImg: string, avatarUrls: string[]): Promise<string> => {
@@ -1086,10 +1192,17 @@ const App = () => {
       3. **排版规范**: 
          - 代码块必须指明语言 (如 \`\`\`bash, \`\`\`python)。
          - 关键信息使用列表 (Bullet points)。
-      4. **视觉插图**:
-         - 如果 README 提供了图片 URL (见 Available Images 列表)，请务必在文章中插入这些图片，特别是展示核心功能或界面的图片。请直接使用列表中提供的 URL，不要修改。
-       5. **技术深度**:
-          - 使用专业的开发者术语。避免过度简化。假设读者是资深工程师。
+      4. **视觉插图 (极其重要)**:
+         - **强制穿插**：无论生成何种风格的文章，只要 'Available Images' 列表不为空，你**必须**在文章的正文逻辑中穿插使用这些 GitHub 提供的图片。
+         - **提升阅读性**：用图片来增强文章的故事逻辑性和可读性，做到图文并茂（例如在介绍界面、核心功能或原理解析后立刻使用对应的图片）。
+         - **格式限制**：使用标准 Markdown 格式 \`![图例说明](URL)\`，且只允许使用列表中给定的真实 URL，绝不可自己编造图片链接。
+      5. **安全与合规底线 (Safety & Compliance - CRITICAL)**:
+         - **绝对禁止**：文章结构、描述、总结中，绝不能出现涉嫌违法违规的内容，也不能引导用户进行任何违法行为。
+         - 严禁包含：违反宪法原则、危害国家安全、泄露国家秘密、颠覆国家政权、破坏国家统一的内容。
+         - 严禁包含：损害国家荣誉和利益、煽动民族仇恨/歧视、破坏国家宗教政策、宣扬邪教和封建迷信、散布不实信息、扰乱社会秩序等相关内容。
+         - 严禁包含：散布淫秽、色情、赌博、暴力、恐怖或教唆犯罪，侮辱/诽谤他人等侵害他人合法权益的内容。
+      6. **Tone & Style (严格执行写作风格与去AI化指令)**:
+${currentPromptStyle.toneGuidelines}
       ` : `
       **Core Writing Rules (Based on README)**:
       1. **Fact-First**: 
@@ -1106,17 +1219,15 @@ const App = () => {
          - Code blocks must specify language.
          - Use bullet points.
       4. **Visuals (CRITICAL & ABSOLUTELY MANDATORY)**:
-         - If the 'Available Images' list is NOT empty, you MUST embed at least 1-3 images into the article.
-         - **Placement**: Insert images immediately after the section they illustrate (e.g., UI screenshots in "Key Features").
-         - **Format**: Use standard Markdown image syntax: \`![description](<url>)\`.
-         - **Source**: ONLY use URLs from the "Available Images" list below. Do not make up URLs.
-       5. **Tone & Style (CRITICAL & STRICT)**:
-          - **Extreme Brevity (极简短句)**: Use very short, punchy sentences. Break long sentences into smaller ones. Write like a casual WeChat Moments post or a tweet.
-          - **Data & Facts First**: Highlight numbers immediately (e.g., "两个月从零冲到 1.4 万的Star", "有 30 个专业 Agent 角色").
-          - **Conversational & Grounded (极度接地气)**: Write as if chatting with a developer friend. Use casual connectors like "跟...一样", "直接", "就行", "还支持".
-          - **BANNED WORDS (绝对禁用)**: Do NOT use any marketing fluff, corporate jargon, or formal transitions. You are FORBIDDEN from using phrases like: "正是为了解决这一痛点而生", "旨在", "致力于", "提供了一套", "不仅...更...", "跃迁", "赋能", "生态", "矩阵", "往往会陷入...迷茫".
-          - **Clean Markdown Emphasis**: For text emphasis (bolding, coloring), ONLY use standard Markdown `**bold**` syntax. NEVER use HTML tags like `<font>`, `<span>`, or `<b>`.
-          - **Example Style**: "oh-my-codex 跟上面那个 oh-my-claudecode 是同一个作者。把类似的多 Agent 编排理念移植到了 OpenAI Codex CLI 上。两个月从零冲到 1.4 万的Star，增长速度在开源项目里相当少见。有 30 个专业 Agent 角色和 40 多个 Skill。支持在 tmux 里启动最多 20 个 Worker 并行干活。npm install -g oh-my-codex 之后 omx setup 就行。"
+         - **Strict Rule**: Regardless of the writing style, if the 'Available Images' list is not empty, you **MUST** interleave these real project images throughout the article.
+         - **Storytelling Logic**: Use the images to enhance the story's logic, flow, and readability (e.g., placing UI screenshots right after describing a feature, or architecture diagrams when explaining how it works).
+         - **Format**: Use standard Markdown image syntax \`![description](<url>)\`.
+         - **Source**: ONLY use URLs from the "Available Images" list below. Do NOT hallucinate URLs.
+      5. **Safety & Compliance (CRITICAL)**:
+         - **Absolute Prohibition**: The generated article MUST NOT contain any descriptions of illegal activities or guide users towards illegal behaviors.
+         - Strictly prohibited topics include: Subversion of state power, endangering national security, terrorism, violence, gambling, pornography, superstition, discrimination, spreading rumors, and defamation. Maintain adherence to all public order and moral standards.
+      6. **Tone & Style (CRITICAL & STRICT)**:
+${currentPromptStyle.toneGuidelines}
       `;
 
       let prompt = "";
@@ -1125,7 +1236,7 @@ const App = () => {
           const s = allStats[0];
           
           prompt = `
-          **Role**: Engaging Tech Storyteller and Developer Advocate.
+          **Role**: ${currentPromptStyle.role}
           **Task**: Write a structured, in-depth introduction article for the GitHub project "${s.repoPath}".
           
           **Input Data**:
@@ -1167,7 +1278,7 @@ const App = () => {
       } else {
           // Logic for multiple repos (Collections)
           prompt = `
-          **Role**: Engaging Tech Storyteller and Open Source Curator.
+          **Role**: ${currentPromptStyle.role}
           **Task**: Write a "Weekly Collection" introducing these tools based on their READMEs.
           
           **Projects**:
@@ -1265,26 +1376,45 @@ const App = () => {
     setPublishStatus(null);
     try {
         const prompt = lang === 'zh' ? `
-        **角色**: 资深技术编辑。
-        **任务**: 润色这篇文章，使其更自然、流畅，但保持技术准确性。
+        **角色**: 基于 "Signs of AI writing" 指南的高级去AI化编辑 (Humanizer)。
+        **任务**: 重新编写输入的文章，彻底消除 AI 写作的生硬感、八股文感和塑料味，使文风拥有真实的 "人情味" (Human Soul)。
         
-        **严格指令**:
-        1. **结构保持**: 绝对保留 Markdown 结构，包括标题 (H2, H3)、代码块和 [PROJECT_CARD_x] 占位符。
-        2. **语言风格**: 
-           - 去除机器翻译感。
-           - 保持专业、客观，使用地道的技术术语。
+        **执行策略/严格指令**:
+        1. **结构绝对保持**: 绝对保留所有现有的 Markdown 结构，包括标题 (H2, H3)、代码块、图片链接和 [PROJECT_CARD_x] 占位符。千万不能删掉内容。
+        2. **彻底抹除 AI 常见句式**:
+           - **干掉假大空和过度升华**: 删掉“这不仅是...更是...”、“旨在”、“致力于”、“提供了一套”、“无疑是...”、“具有里程碑意义”、“不可或缺的基石”、“赋能”。
+           - **打破套路/避免排比**: AI 喜欢写 "提升了X，降低了Y，促进了Z"。请打破这种机械堆砌，用真实人类的长短句结合重写。
+           - **干掉做作的过渡与修饰**: 删掉“此外”、“事实上”、“值得注意的是”、“总而言之”、“在这个数字化快速发展的时代”。
+           - **不要播音腔/宣讲感**: 避免“让我们一探究竟”、“这就带你了解一下”。直接切入正题。
+        3. **注入灵魂 (Add Soul)**: 
+           - 增加主观的情感表达，可以适度加入一些“自言自语”或程序员视角的吐槽、真实体感。
+           - 多用极简短句和接地气的连接口语（例如“跟...一样”, “直接”, “就行”）。
+        4. **格式与样式**: 只能使用标准 Markdown (\`**加粗**\`)。绝不允许输出 HTML 标签如 \`<font>\`, \`<span>\`, 或 \`<b>\`。
+        
+        只输出重写后的 Markdown 全文，不要包含任何前缀或解释。
         
         **输入文章**:
         ${article}
         ` : `
-        **Role**: Technical Editor.
-        **Task**: Polish this article to sound natural but professionally accurate.
+        **Role**: Expert Anti-AI Writing Editor (Humanizer), based on Wikipedia's "Signs of AI writing".
+        **Task**: Rewrite the input article to completely remove the sterile, robotic "AI-generated" tone. Give it a real human pulse and personality.
         
-        **Instructions**:
-        1. KEEP Markdown structure, headers (H2, H3), code, and placeholders [PROJECT_CARD_x].
-        2. Fix robotic phrasing. Use expert developer terminology.
+        **Execution Strategy & Strict Instructions**:
+        1. **Keep Structure EXACTLY**: Strictly preserve all Markdown structure: headers (H2, H3), code blocks, image URLs, and placeholders like [PROJECT_CARD_x].
+        2. **Eradicate AI Patterns**:
+           - **No Inflated Significance**: Remove words like "testament", "pivotal moment", "evolving landscape", "vital role", "game-changer".
+           - **No Superficial Fluff**: Remove tacked-on "-ing" present participles ("highlighting...", "underscoring...", "enhancing...").
+           - **No Rule of Three / Parallelism**: Break up mechanical lists (e.g., "fast, reliable, and scalable") into varied, natural phrasing.
+           - **No Signposting or Sycophancy**: Remove phrases like "At its core", "Let's dive in", "It's important to note".
+           - **Use Active Voice & Direct Language**: Avoid "It stands as...". Use simple copulas ("is", "are").
+        3. **Add Personality (Soul)**:
+           - Write with opinions, variations in sentence rhythm (mix very short, punchy sentences with longer flowing ones), and a grounded, slice-of-life developer perspective.
+           - It should sound like a smart coworker explaining something over coffee, not a corporate press release.
+        4. **Clean Markdown ONLY**: For text emphasis, ONLY use standard Markdown \`**bold**\` syntax. NEVER use HTML tags like \`<font>\`, \`<span>\`, or \`<b>\`.
         
-        **Input**:
+        Output ONLY the final revised Markdown text. No meta-commentary.
+        
+        **Input Article**:
         ${article}
         `;
 
@@ -1965,6 +2095,21 @@ const App = () => {
                
                <div className="space-y-8">
                   <div className="space-y-4">
+                     <div className="space-y-4">
+                        <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">{t.promptStyle}</h4>
+                        <div className="grid grid-cols-3 gap-3">
+                            {PROMPT_STYLES.map(style => (
+                            <button 
+                                key={style.id}
+                                onClick={() => setCurrentPromptStyle(style)}
+                                className={`p-3 rounded-xl border text-xs font-bold transition-all text-center ${currentPromptStyle.id === style.id ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                            >
+                                {style.name}
+                            </button>
+                            ))}
+                        </div>
+                     </div>
+
                      <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-widest">{t.visualStyle}</h4>
                      <div className="grid grid-cols-3 gap-3">
                         {THEMES.map(theme => (

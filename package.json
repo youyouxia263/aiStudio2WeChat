@@ -12,10 +12,12 @@
     "@google/genai": "^1.33.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "jsdom": "^29.0.2",
     "marked": "15.0.6",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tsx": "^4.21.0",
+    "turndown": "^7.2.4",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

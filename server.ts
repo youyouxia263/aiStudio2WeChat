@@ -126,11 +126,14 @@ async function processTask(taskId: string, repoUrl: string) {
          - Code blocks must specify language.
          - Use bullet points.
       4. **Visuals (CRITICAL & ABSOLUTELY MANDATORY)**:
-         - If the 'Available Images' list is NOT empty, you MUST embed at least 1-3 images into the article.
-         - **Placement**: Insert images immediately after the section they illustrate (e.g., UI screenshots in "Key Features").
-         - **Format**: Use standard Markdown image syntax: \`![description](<url>)\`.
-         - **Source**: ONLY use URLs from the "Available Images" list below. Do not make up URLs.
-      5. **Tone & Style (CRITICAL & STRICT)**:
+         - **Strict Rule**: Regardless of the writing style, if the 'Available Images' list is not empty, you **MUST** interleave these real project images throughout the article.
+         - **Storytelling Logic**: Use the images to enhance the story's logic, flow, and readability (e.g., placing UI screenshots right after describing a feature, or architecture diagrams when explaining how it works).
+         - **Format**: Use standard Markdown image syntax \`![description](<url>)\`.
+         - **Source**: ONLY use URLs from the "Available Images" list below. Do NOT hallucinate URLs.
+      5. **Safety & Compliance (CRITICAL)**:
+         - **Absolute Prohibition**: The generated article MUST NOT contain any descriptions of illegal activities or guide users towards illegal behaviors.
+         - Strictly prohibited topics include: violative content against constitution, subversion of state power, endangering national security, terrorism, violence, gambling, pornography, superstition, discrimination, spreading rumors, and defamation. Maintain adherence to all public order and moral standards.
+      6. **Tone & Style (CRITICAL & STRICT)**:
          - **Extreme Brevity (极简短句)**: Use very short, punchy sentences. Break long sentences into smaller ones. Write like a casual WeChat Moments post or a tweet.
          - **Data & Facts First**: Highlight numbers immediately (e.g., "两个月从零冲到 1.4 万的Star", "有 30 个专业 Agent 角色").
          - **Conversational & Grounded (极度接地气)**: Write as if chatting with a developer friend. Use casual connectors like "跟...一样", "直接", "就行", "还支持".
@@ -200,6 +203,25 @@ async function processTask(taskId: string, repoUrl: string) {
 }
 
 // --- API Routes ---
+
+app.post('/api/proxy', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      res.status(400).json({ error: 'Missing url' });
+      return;
+    }
+    const response = await fetch(url);
+    if (!response.ok) {
+        res.status(response.status).json({ error: `Fetch failed: ${response.statusText}` });
+        return;
+    }
+    const text = await response.text();
+    res.json({ content: text });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.post('/api/generate', (req, res) => {
   const { url } = req.body;
